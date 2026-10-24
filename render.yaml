@@ -1,0 +1,20 @@
+# Render blueprint: deploys the FastAPI backend as a Docker web service.
+# Dashboard: https://dashboard.render.com -> New -> Blueprint -> paste this repo.
+# PLACEHOLDERS: replace YOUR-VERCEL-DOMAIN after the frontend is deployed.
+services:
+  - type: web
+    name: wind-forecast-api
+    runtime: docker
+    dockerfilePath: ./backend/Dockerfile
+    dockerContext: ./backend
+    plan: free # 750 hrs/month, no credit card required
+    healthCheckPath: /health
+    envVars:
+      - key: ALLOWED_ORIGINS
+        # Same-origin traffic does not need CORS; add your Vercel URL here:
+        value: https://YOUR-VERCEL-DOMAIN.vercel.app
+      - key: DECISION_CUTOFF_HHMM
+        value: "09:20"
+      - key: CACHE_TTL_SECONDS
+        value: "3600"
+      # Elexon BMRS is keyless - no secrets required.
