@@ -148,3 +148,40 @@ def test_refresh_param_forces_reload_of_cache(synth_store):
     finally:
         app.dependency_overrides.clear()
     assert body["hourly"]["n_matched"] == 31 * 24
+
+
+def test_cors_allows_intended_frontend_origins(client):
+    for origin in ("http://localhost:5173", "http://127.0.0.1:5173"):
+        response = client.get("/health", headers={"Origin": origin})
+        assert response.status_code == 200
+        assert response.headers["access-control-allow-origin"] == origin
+
+
+def test_cors_rejects_other_origins(client):
+    response = client.get("/health", headers={"Origin": "http://evil.example"})
+    assert response.status_code == 200  # request itself is served...
+    assert "access-control-allow-origin" not in response.headers  # ...but no CORS grant
+
+
+def test_cors_preflight_for_intended_origin(client):
+    response = client.options(
+        "/api/accuracy",
+        headers={
+            "Origin": "http://localhost:5173",
+            "Access-Control-Request-Method": "GET",
+        },
+    )
+    assert response.status_code == 200
+    assert response.headers["access-control-allow-origin"] == "http://localhost:5173"
+    assert "GET" in response.headers["access-control-allow-methods"]
+
+
+def test_cors_preflight_denied_for_other_origin(client):
+    response = client.options(
+        "/api/accuracy",
+        headers={
+            "Origin": "http://evil.example",
+            "Access-Control-Request-Method": "GET",
+        },
+    )
+    assert "access-control-allow-origin" not in response.headers

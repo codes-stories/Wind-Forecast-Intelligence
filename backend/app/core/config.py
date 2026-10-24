@@ -20,6 +20,12 @@ class Settings:
     cache_ttl_seconds: int
     http_timeout_seconds: float
     http_retries: int
+    # Origins allowed by CORS: the Vite dev server by default; override with
+    # ALLOWED_ORIGINS (comma-separated) when the frontend is served elsewhere.
+    allowed_origins: tuple[str, ...] = (
+        "http://localhost:5173",
+        "http://127.0.0.1:5173",
+    )
 
     @property
     def period_days(self) -> int:
@@ -51,6 +57,13 @@ def _parse_cutoff(raw: str) -> time:
     return time(hour, minute)
 
 
+def _parse_origins(raw: str) -> tuple[str, ...]:
+    origins = tuple(o.strip() for o in raw.split(",") if o.strip())
+    if not origins:
+        raise ValueError("ALLOWED_ORIGINS must list at least one origin")
+    return origins
+
+
 @lru_cache(maxsize=1)
 def get_settings() -> Settings:
     return Settings(
@@ -61,4 +74,10 @@ def get_settings() -> Settings:
         cache_ttl_seconds=int(_env("CACHE_TTL_SECONDS", "3600")),
         http_timeout_seconds=float(_env("ELEXON_TIMEOUT_SECONDS", "60")),
         http_retries=int(_env("ELEXON_RETRIES", "3")),
+        allowed_origins=_parse_origins(
+            _env(
+                "ALLOWED_ORIGINS",
+                "http://localhost:5173,http://127.0.0.1:5173",
+            )
+        ),
     )

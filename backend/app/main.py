@@ -8,6 +8,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
 from app.api.routes import router
+from app.core.config import get_settings
 from app.models.schemas import ErrorDetail
 from app.services.elexon_client import ElexonError
 
@@ -27,8 +28,8 @@ app = FastAPI(
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
-    allow_methods=["*"],
+    allow_origins=list(get_settings().allowed_origins),
+    allow_methods=["GET"],
     allow_headers=["*"],
 )
 

@@ -1,10 +1,54 @@
 import "@testing-library/jest-dom/vitest";
 
-// Recharts' ResponsiveContainer relies on ResizeObserver, which jsdom lacks.
+// Recharts' ResponsiveContainer relies on ResizeObserver and layout size,
+// neither of which jsdom provides. Simulate a reasonable chart box so charts
+// don't emit "width(0) and height(0)" warnings during tests.
 class ResizeObserverStub {
-  observe(): void {}
-  unobserve(): void {}
-  disconnect(): void {}
+  private readonly callback: ResizeObserverCallback;
+  private readonly elements = new Set<Element>();
+
+  constructor(callback: ResizeObserverCallback) {
+    this.callback = callback;
+  }
+
+  observe(element: Element): void {
+    if (this.elements.has(element)) return;
+    this.elements.add(element);
+    queueMicrotask(() => {
+      if (!this.elements.has(element)) return;
+      const box = {
+        width: 800,
+        height: 320,
+        top: 0,
+        left: 0,
+        right: 800,
+        bottom: 320,
+        x: 0,
+        y: 0,
+        toJSON: () => ({}),
+      };
+      this.callback(
+        [
+          {
+            target: element,
+            contentRect: box,
+            borderBoxSize: [],
+            contentBoxSize: [],
+            devicePixelContentBoxSize: [],
+          } as unknown as ResizeObserverEntry,
+        ],
+        this as unknown as ResizeObserver,
+      );
+    });
+  }
+
+  unobserve(element: Element): void {
+    this.elements.delete(element);
+  }
+
+  disconnect(): void {
+    this.elements.clear();
+  }
 }
 
 if (!("ResizeObserver" in globalThis)) {
@@ -14,6 +58,31 @@ if (!("ResizeObserver" in globalThis)) {
     configurable: true,
   });
 }
+
+// jsdom performs no layout, so every element reports a 0×0 rect. Recharts sizes
+// itself from getBoundingClientRect() and warns on 0. Give zero-sized elements
+// a plausible chart box so tests behave like a real browser.
+const elementProto = Element.prototype as unknown as {
+  getBoundingClientRect: () => DOMRect;
+};
+const originalGetBoundingClientRect = elementProto.getBoundingClientRect;
+elementProto.getBoundingClientRect = function patched(this: Element): DOMRect {
+  const rect = originalGetBoundingClientRect.call(this);
+  if (rect.width === 0 && rect.height === 0) {
+    return {
+      x: 0,
+      y: 0,
+      width: 800,
+      height: 320,
+      top: 0,
+      left: 0,
+      right: 800,
+      bottom: 320,
+      toJSON: () => ({}),
+    } as DOMRect;
+  }
+  return rect;
+};
 
 // jsdom's AbortSignal belongs to a different realm than Node's (undici) fetch,
 // which rejects it with "Expected signal to be an instance of AbortSignal".
