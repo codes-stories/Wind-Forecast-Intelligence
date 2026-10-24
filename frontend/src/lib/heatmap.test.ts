@@ -80,10 +80,10 @@ describe("cellColor", () => {
     expect(cellColor(null, "absolute", 1000)).toBe("");
   });
 
-  it("genuine zero error gets a neutral fill, not the missing style", () => {
+  it("genuine zero error gets a themed neutral fill, not the missing style", () => {
     const zero = cellColor(0, "signed", 1000);
     expect(zero).not.toBe("");
-    expect(zero).toBe("#f4f6f9");
+    expect(zero).toBe("var(--heat-zero)"); // light/dark resolved by CSS
   });
 
   it("signed mode diverges: positive (over) amber vs negative (under) blue", () => {
@@ -100,7 +100,7 @@ describe("cellColor", () => {
     expect(cellColor(1000, "absolute", 1000)).toContain("59, 127, 196");
   });
 
-  it("all-missing data (maxAbs 0) still yields neutral fills for present values", () => {
-    expect(cellColor(0, "absolute", 0)).toBe("#f4f6f9");
+  it("all-missing data (maxAbs 0) still yields themed neutral fills for present values", () => {
+    expect(cellColor(0, "absolute", 0)).toBe("var(--heat-zero)");
   });
 });

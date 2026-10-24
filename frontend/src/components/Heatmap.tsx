@@ -110,12 +110,13 @@ export default function Heatmap({ rows }: Props) {
                             }`
                           : undefined
                       }
-                      className="h-2.5 w-2.5 border border-white/60"
+                      className="h-2.5 w-2.5 border"
                       style={{
+                        borderColor: "var(--cell-border)",
                         backgroundColor: color,
                         backgroundImage:
                           present && value === null
-                            ? "repeating-linear-gradient(45deg, #d7dbe3 0 2px, #f4f6f9 2px 4px)"
+                            ? "repeating-linear-gradient(45deg, var(--heat-hatch-a) 0 2px, var(--heat-hatch-b) 2px 4px)"
                             : undefined,
                         cursor: cell ? "crosshair" : "default",
                       }}
@@ -146,7 +147,7 @@ export default function Heatmap({ rows }: Props) {
             style={{
               background:
                 mode === "signed"
-                  ? "linear-gradient(to right, rgba(59,127,196,1), #f4f6f9, rgba(201,141,30,1))"
+                  ? "linear-gradient(to right, rgba(59,127,196,1), var(--heat-zero), rgba(201,141,30,1))"
                   : "linear-gradient(to right, rgba(59,127,196,0.08), rgba(59,127,196,0.98))",
             }}
           />
@@ -155,12 +156,12 @@ export default function Heatmap({ rows }: Props) {
         <div className="flex items-center gap-2">
           <span
             className="h-3 w-4 border border-ink-200"
-            style={{ backgroundImage: "repeating-linear-gradient(45deg, #d7dbe3 0 2px, #f4f6f9 2px 4px)" }}
+            style={{ backgroundImage: "repeating-linear-gradient(45deg, var(--heat-hatch-a) 0 2px, var(--heat-hatch-b) 2px 4px)" }}
           />
           <span>missing (no matched value)</span>
         </div>
         <div className="flex items-center gap-2">
-          <span className="h-3 w-4 border border-ink-200 bg-[#f4f6f9]" />
+          <span className="h-3 w-4 border border-ink-200" style={{ backgroundColor: "var(--heat-zero)" }} />
           <span>error ≈ 0 MW</span>
         </div>
         <span>{missingCount} of {data.cells.length} cells missing</span>
@@ -169,7 +170,7 @@ export default function Heatmap({ rows }: Props) {
 
       {hover && (
         <div
-          className="pointer-events-none fixed z-50 rounded-md border border-ink-200 bg-white px-3 py-2 text-xs shadow-md"
+          className="pointer-events-none fixed z-50 rounded-md border border-ink-200 bg-surface px-3 py-2 text-xs shadow-md"
           style={{ left: Math.min(hover.x + 14, window.innerWidth - 240), top: hover.y + 14 }}
         >
           <div className="font-semibold text-ink-900">{formatUtc(hover.cell.timestamp)}</div>

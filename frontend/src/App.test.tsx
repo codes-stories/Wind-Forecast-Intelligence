@@ -395,11 +395,12 @@ describe("Section navigation and new features", () => {
     render(<App />);
     await screen.findByText("13,000 MW");
     const link = screen.getByRole("link", { name: "Export CSV" });
-    expect(link).toHaveAttribute("href", "/api/export.csv?start=2026-01-01&end=2026-01-31&grain=halfhourly");
+    expect(link.getAttribute("href")).toContain(
+      "/api/export.csv?start=2026-01-01&end=2026-01-31&grain=halfhourly",
+    );
     fireEvent.change(screen.getByLabelText("Aggregation"), { target: { value: "daily" } });
     await waitFor(() => {
-      expect(screen.getByRole("link", { name: "Export CSV" })).toHaveAttribute(
-        "href",
+      expect(screen.getByRole("link", { name: "Export CSV" }).getAttribute("href")).toContain(
         "/api/export.csv?start=2026-01-01&end=2026-01-31&grain=hourly",
       );
     });

@@ -121,8 +121,8 @@
   `metrics_service` (statistics) → `insights_service` (deterministic findings — no LLM);
   schemas are the single source of truth mirrored in `types.ts`; heatmap prep lives in
   `frontend/src/lib/heatmap.ts` (unit-tested, no metric recalculation client-side).
-- Tests on screen: `71 passed` (pytest) · `34 passed` (vitest) · optional
-  `LIVE=1 … npm test` → **35th integration test against the real backend**.
+- Tests on screen: `71 passed` (pytest) · `40 passed` (vitest) · optional
+  `LIVE=1 … npm test` → **41st integration test against the real backend**.
 - Error handling: validation → 400/422 with machine-readable `detail`; upstream failure → 502
   with the real Elexon error; frontend shows a retryable error panel; missing data renders as
   gaps/“—”, never as zero (CSV export writes empty fields, never `0`). CORS restricted to

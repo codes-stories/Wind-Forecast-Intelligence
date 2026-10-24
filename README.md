@@ -59,12 +59,18 @@ outturn comparisons are usually averaged into opacity.
 - **Analyst CSV export (Feature F)** — `Export CSV` downloads the filtered rows (same selection
   logic as `/api/timeseries`); timestamps ISO 8601 UTC, missing values empty and never `0`.
 - **Section navigation** — Overview · Forecast Explorer · Error Analysis · Data Quality.
+- **Dark & light mode** — toggle in the header (moon/sun button); the choice persists in
+  `localStorage`, `?theme=dark|light` in the URL overrides it for screenshots/sharing, and the
+  first visit follows the OS `prefers-color-scheme`. Applied before first paint (no flash) and
+  applied consistently to cards, tables, Recharts palettes and the error heatmap.
 
 ## 3. Screenshots
 
 Actual rendered dashboard (headless Chrome against the running app, real January 2026 API data):
 
 ![Dashboard — full page](docs/screenshots/dashboard-full.png)
+
+![Dashboard — dark mode](docs/screenshots/dashboard-dark.png)
 
 *(Header + section tabs (Overview · Forecast Explorer · Error Analysis · Data Quality) + filters +
 KPIs, forecast-vs-actual chart, evidence-based insights, and the first page of the delivery data
@@ -162,7 +168,7 @@ Two deployment modes:
 ├── data/samples/              # small verified API samples + provenance manifest
 ├── docs/
 │   ├── api_findings.md        # verified Elexon contract, cutoff sources, risks
-│   └── screenshots/dashboard-full.png
+│   └── screenshots/          # dashboard-full.png (light) + dashboard-dark.png
 ```
 
 ## 7. Data sources and Elexon fields
@@ -337,14 +343,14 @@ cd backend && ../.venv/bin/python -m pytest
 # navigation, explorer/heatmap/quality/insights rendering, heatmap prep, pure funcs)
 cd frontend && npm test
 
-# Opt-in live integration test against a real running backend (35th test)
+# Opt-in live integration test against a real running backend (41st test)
 cd frontend && LIVE=1 VITE_API_BASE=http://127.0.0.1:8000 npm test
 
 # Upstream contract verification (stdlib only, hits the real Elexon API)
 python3 scripts/verify_api.py
 ```
 
-Latest run: backend **71 passed**, frontend **34 passed + 1 gated**, live mode **35 passed**,
+Latest run: backend **71 passed**, frontend **40 passed + 1 gated**, live mode **41 passed**,
 `tsc --noEmit` and `npm run build` clean.
 
 ## 17. Deployment status and URLs

@@ -30,7 +30,7 @@ export default function TabNav({ view, onChange }: Props) {
               onClick={() => onChange(tab.id)}
               className={
                 active
-                  ? "whitespace-nowrap border-b-2 border-signal-600 px-3 py-2 text-sm font-semibold text-signal-700"
+                  ? "whitespace-nowrap border-b-2 border-signal-600 px-3 py-2 text-sm font-semibold text-signal-600"
                   : "whitespace-nowrap border-b-2 border-transparent px-3 py-2 text-sm font-medium text-ink-600 hover:text-ink-900"
               }
             >

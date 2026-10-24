@@ -17,6 +17,7 @@ import {
 import { ApiError, api } from "../api/client";
 import type { VintageIntervalResponse, VintageItem } from "../api/types";
 import { formatMw, formatMwSigned, formatUtc } from "../lib/aggregate";
+import { useTheme } from "../theme";
 import { EmptyState, ErrorPanel, LoadingState } from "./States";
 
 interface Props {
@@ -45,7 +46,7 @@ function VintageTooltip({ active, payload }: { active?: boolean; payload?: { pay
   const point = payload?.[0]?.payload;
   if (!active || !point) return null;
   return (
-    <div className="rounded-md border border-ink-200 bg-white px-3 py-2 text-xs shadow-md">
+    <div className="rounded-md border border-ink-200 bg-surface px-3 py-2 text-xs shadow-md">
       <div className="font-semibold text-ink-900">Published {formatUtc(point.publish)}</div>
       <div className="font-mono text-ink-800">Forecast: {formatMw(point.forecast)}</div>
       <div className="text-ink-500">
@@ -94,6 +95,8 @@ export default function ForecastExplorer({ minDate, maxDate, defaultDate }: Prop
       });
     return () => controller.abort();
   }, [date, period, attempt]);
+
+  const { colors } = useTheme();
 
   const chartPoints: ChartPoint[] = useMemo(() => {
     if (!data) return [];
@@ -220,31 +223,31 @@ export default function ForecastExplorer({ minDate, maxDate, defaultDate }: Prop
             <div role="img" aria-label="Line chart of forecast values across publication vintages" className="h-72">
               <ResponsiveContainer width="100%" height="100%">
                 <ComposedChart data={chartPoints} margin={{ top: 8, right: 16, bottom: 8, left: 8 }}>
-                  <CartesianGrid strokeDasharray="3 3" stroke="#eceef2" />
+                  <CartesianGrid strokeDasharray="3 3" stroke={colors.grid} />
                   <XAxis
                     dataKey="label"
-                    tick={{ fontSize: 10, fill: "#66748c" }}
+                    tick={{ fontSize: 10, fill: colors.axis }}
                     tickLine={false}
                     angle={-35}
                     textAnchor="end"
                     height={56}
                     interval={0}
                   />
-                  <YAxis tick={{ fontSize: 11, fill: "#66748c" }} width={56} domain={["auto", "auto"]} />
+                  <YAxis tick={{ fontSize: 11, fill: colors.axis }} width={56} domain={["auto", "auto"]} />
                   <Tooltip content={<VintageTooltip />} />
                   {data.actual_mw !== null && (
                     <ReferenceLine
                       y={data.actual_mw}
-                      stroke="#1f9d6b"
+                      stroke={colors.actualRef}
                       strokeDasharray="4 3"
-                      label={{ value: "actual", position: "insideTopLeft", fontSize: 10, fill: "#1f9d6b" }}
+                      label={{ value: "actual", position: "insideTopLeft", fontSize: 10, fill: colors.actualRef }}
                     />
                   )}
                   <Line
                     type="stepAfter"
                     dataKey="forecast"
                     name="Forecast (MW)"
-                    stroke="#b0bac9"
+                    stroke={colors.reference}
                     strokeWidth={2}
                     dot={false}
                     isAnimationActive={false}
@@ -252,14 +255,14 @@ export default function ForecastExplorer({ minDate, maxDate, defaultDate }: Prop
                   <Scatter
                     data={eligiblePoints}
                     dataKey="forecast"
-                    fill="#5b9bd5"
+                    fill={colors.eligible}
                     shape="circle"
                     isAnimationActive={false}
                   />
                   <Scatter
                     data={postCutoffPoints}
                     dataKey="forecast"
-                    fill="#c98d1e"
+                    fill={colors.postCutoff}
                     shape="circle"
                     isAnimationActive={false}
                   />
@@ -267,7 +270,7 @@ export default function ForecastExplorer({ minDate, maxDate, defaultDate }: Prop
                     <Scatter
                       data={[selectedPoint]}
                       dataKey="forecast"
-                      fill="#3b7fc4"
+                      fill={colors.selected}
                       shape="circle"
                       isAnimationActive={false}
                     />

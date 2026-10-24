@@ -8,6 +8,24 @@
       name="description"
       content="Retrospective day-ahead UK wind generation forecast vs outturn analysis for January 2026. Source: Elexon BMRS."
     />
+    <script>
+      // Apply the stored/system theme before first paint (no flash).
+      // Mirrors initialTheme() in src/theme.tsx: ?theme= → localStorage → OS.
+      (function () {
+        try {
+          var t = new URLSearchParams(location.search).get("theme");
+          if (t !== "dark" && t !== "light") t = localStorage.getItem("wfi-theme");
+          if (t !== "dark" && t !== "light")
+            t =
+              window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches
+                ? "dark"
+                : "light";
+          document.documentElement.classList.toggle("dark", t === "dark");
+        } catch (e) {
+          /* keep default light theme */
+        }
+      })();
+    </script>
   </head>
   <body>
     <div id="root"></div>

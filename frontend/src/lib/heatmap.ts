@@ -61,12 +61,12 @@ function clamp01(t: number): number {
 /** Diverging (signed) / sequential (absolute) colour; null -> "" (hatched missing). */
 export function cellColor(value: number | null, mode: HeatmapMode, maxAbs: number): string {
   if (value === null) return "";
-  if (maxAbs <= 0) return "#f4f6f9";
+  if (maxAbs <= 0) return "var(--heat-zero)";
   const t = clamp01(Math.abs(value) / maxAbs);
   if (mode === "absolute") {
     return `rgba(59, 127, 196, ${(0.08 + 0.9 * t).toFixed(3)})`;
   }
-  if (Math.abs(value) < 1e-9) return "#f4f6f9"; // genuine zero error: neutral, not missing
+  if (Math.abs(value) < 1e-9) return "var(--heat-zero)"; // genuine zero error: themed neutral, not missing
   if (value > 0) return `rgba(201, 141, 30, ${(0.15 + 0.85 * t).toFixed(3)})`; // over-forecast
   return `rgba(59, 127, 196, ${(0.15 + 0.85 * t).toFixed(3)})`; // under-forecast
 }
