@@ -1,0 +1,31 @@
+{
+ "fetched_at_utc": "2026-10-24T05:43:38+00:00",
+ "source": "Elexon Insights (BMRS) API",
+ "requests": {
+  "actuals": "https://data.elexon.co.uk/bmrs/api/v1/datasets/FUELHH/stream?settlementDateFrom=2026-01-15&settlementDateTo=2026-01-15&fuelType=WIND",
+  "eligible_vintage": "https://data.elexon.co.uk/bmrs/api/v1/datasets/WINDFOR/stream?publishDateTimeFrom=2026-01-14T07%3A30%3A00Z&publishDateTimeTo=2026-01-14T07%3A30%3A59Z",
+  "post_cutoff_vintage": "https://data.elexon.co.uk/bmrs/api/v1/datasets/WINDFOR/stream?publishDateTimeFrom=2026-01-14T09%3A30%3A00Z&publishDateTimeTo=2026-01-14T09%3A30%3A59Z"
+ },
+ "decision_cutoff_rule": "Latest WINDFOR vintage with publishTime <= 09:20 UTC on D-1 (EPEX SPOT GB day-ahead order-book closure) covering all hours of D.",
+ "checks": {
+  "actual_rows_is_48": true,
+  "actual_unique_settlement_periods": true,
+  "actual_no_nulls": true,
+  "eligible_vintage_rows": 73,
+  "eligible_vintage_covers_delivery_day_hours": true,
+  "eligible_vintage_publishTime": "2026-01-14T07:30:00Z",
+  "post_cutoff_vintage_publishTime": "2026-01-14T09:30:00Z",
+  "forecast_rows_on_minute_00_only": true,
+  "scale_crosscheck": {
+   "actual_min_max_mw": [
+    7183,
+    14602
+   ],
+   "forecast_min_max_mw": [
+    8864,
+    15834
+   ],
+   "note": "same magnitude for the same delivery day; supports the MW assumption"
+  }
+ }
+}
