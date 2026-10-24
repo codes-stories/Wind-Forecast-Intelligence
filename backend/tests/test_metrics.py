@@ -101,3 +101,62 @@ def test_averages_use_matched_intervals_only():
     stats = compute_stats(points, expected_count=2, grain="hourly")
     assert stats.avg_actual_mw == 100.0
     assert stats.avg_forecast_mw == 200.0
+
+
+# -- Feature C: reliability additions ---------------------------------------
+
+
+def test_median_absolute_error_for_odd_and_even_samples():
+    odd = compute_stats(
+        [point(STATUS_MATCHED, 100, 110), point(STATUS_MATCHED, 100, 120),
+         point(STATUS_MATCHED, 100, 160)],  # |err| = 10, 20, 60
+        3, "hourly",
+    )
+    assert odd.median_abs_error_mw == 20.0
+    even = compute_stats(
+        [point(STATUS_MATCHED, 100, 110), point(STATUS_MATCHED, 100, 120),
+         point(STATUS_MATCHED, 100, 150), point(STATUS_MATCHED, 100, 160)],  # 10,20,50,60
+        4, "hourly",
+    )
+    assert even.median_abs_error_mw == 35.0  # (20+50)/2
+
+
+def test_p90_nearest_rank_requires_ten_matched_intervals():
+    # <10 matched -> p90 null (not reported from a thin sample)
+    few = compute_stats([point(STATUS_MATCHED, 100, 110)] * 9, 9, "hourly")
+    assert few.p90_abs_error_mw is None
+    # 10 matched, |err| all 10 except one 1000 -> nearest-rank rank=ceil(9)=9 -> 10
+    values = [10] * 9 + [1000]
+    points = [
+        point(STATUS_MATCHED, 100, 100 + v, hour=i) for i, v in enumerate(values)
+    ]
+    stats = compute_stats(points, 10, "hourly")
+    assert stats.p90_abs_error_mw == 10.0  # 9th smallest of 10
+    # and the max sits above p90
+    assert max(values) > stats.p90_abs_error_mw
+    # 100 matched with |err| = index -> nearest-rank: ceil(0.9*100)=90th smallest -> 90
+    points = [point(STATUS_MATCHED, 0, i + 1, hour=i % 24, day=1 + i // 24) for i in range(100)]
+    stats = compute_stats(points, 100, "hourly")
+    assert stats.p90_abs_error_mw == 90.0
+
+
+def test_p90_is_null_when_zero_matched():
+    stats = compute_stats([], 10, "hourly")
+    assert stats.p90_abs_error_mw is None
+    assert stats.median_abs_error_mw is None
+
+
+def test_missing_actual_and_forecast_counts_are_explicit():
+    from app.models.records import STATUS_ACTUAL_ONLY, STATUS_FORECAST_ONLY
+
+    points = [
+        point(STATUS_MATCHED, 100, 110),
+        point(STATUS_FORECAST_ONLY, None, 90),
+        point(STATUS_FORECAST_ONLY, None, 95),
+        point(STATUS_ACTUAL_ONLY, 100, None),
+    ]
+    stats = compute_stats(points, expected_count=4, grain="hourly")
+    assert stats.n_missing_actual == 2  # forecast_only x2
+    assert stats.n_missing_forecast == 1  # actual_only x1
+    assert stats.n_matched == 1
+    assert stats.n_missing == 3

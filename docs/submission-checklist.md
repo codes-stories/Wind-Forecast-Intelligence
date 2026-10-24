@@ -30,12 +30,13 @@ until deployment happens.
 ## Submission checklist
 
 - [ ] **Application deployed and tested.** — ❌ **Blocked.** Local + Docker stacks are built
-      and fully tested (55 backend tests, 16+1 frontend tests, Phase-4 audit). Public
-      deployment awaits two tokens: Vercel token + Render API key (user chose “Provide API
+      and fully tested (71 backend tests, 34+1 frontend tests, Phase-4 audit, Features A–F
+      enhancement re-verified end-to-end). Public deployment awaits two tokens: Vercel token +
+      Render API key (user chose “Provide API
       tokens” in Phase 5; none were supplied). Deploy commands: README §17 and `render.yaml`.
 - [x] **Public GitHub repository created with anonymous naming.**
       — ✅ `github.com/codes-stories/Wind-Forecast-Intelligence` (public, non-identifying
-      name; verified 200; latest commit `3f98d81` + Phase-7 docs pushed).
+      name; verified 200; commits pushed through the Features A–F enhancement).
 - [x] **README includes setup instructions and AI disclosure.**
       — ✅ README §12–§16 (install, Docker, env vars, API, tests — all re-verified against the
       codebase in Phase 6) and §18 (AI tools: opencode agent, per-phase role, human decisions).

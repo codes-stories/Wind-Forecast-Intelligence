@@ -37,6 +37,28 @@ outturn comparisons are usually averaged into opacity.
   status counts are always reported beside metrics.
 - **Filtering** — date range and aggregation (half-hourly / hourly / daily) drive charts, table and
   KPIs from the same dataset.
+- **Forecast vintage explorer (Feature A)** — pick any delivery interval and see every historical
+  WINDFOR publication covering it (16–24 per interval in January 2026): chronological evolution
+  chart, Δ vs previous publication, eligible-at-cutoff vs post-cutoff badges, the selected vintage
+  that drives evaluation, the latest-available publication (context only), and the selected-vintage
+  error against the actual outturn.
+- **Forecast error heatmap (Feature B)** — 48 settlement periods × delivery days grid with a
+  signed/absolute toggle; diverging amber (over) vs blue (under) scale; missing cells are hatched
+  and distinct from a genuine zero error.
+- **Reliability & risk indicators (Feature C)** — median absolute error, 90th-percentile absolute
+  error (nearest-rank, ≥10 matched intervals), RMSE−MAE gap, explicit missing-actual/missing-forecast
+  counts and MAPE exclusion count, each with a plain-language definition tooltip.
+- **Data quality & provenance panel (Feature D)** — retrieved vs present vs eligible vs selected
+  record counts, duplicates/nulls dropped, matched/missing intervals, coverage, cache age, and the
+  explicit limitations list; status is neutral (`all intervals matched` / `incomplete coverage`),
+  never “verified”.
+- **Evidence-based insights (Feature E)** —3–5 deterministic findings computed in Python from the
+  filtered range (bias direction, coverage, worst-MAE day, day-to-day spread, largest miss, error
+  tail), each listing the exact numbers behind it; no LLM, no rules engine, unavailable findings are
+  marked as such instead of invented.
+- **Analyst CSV export (Feature F)** — `Export CSV` downloads the filtered rows (same selection
+  logic as `/api/timeseries`); timestamps ISO 8601 UTC, missing values empty and never `0`.
+- **Section navigation** — Overview · Forecast Explorer · Error Analysis · Data Quality.
 
 ## 3. Screenshots
 
@@ -44,8 +66,11 @@ Actual rendered dashboard (headless Chrome against the running app, real January
 
 ![Dashboard — full page](docs/screenshots/dashboard-full.png)
 
-*(Header + filters + KPIs, forecast-vs-actual chart, signed-error chart with p90 flags,
-absolute-error histogram, and the first page of the delivery data table.)*
+*(Header + section tabs (Overview · Forecast Explorer · Error Analysis · Data Quality) + filters +
+KPIs, forecast-vs-actual chart, evidence-based insights, and the first page of the delivery data
+table. The Forecast Explorer tab adds the vintage evolution chart; Error Analysis adds the
+half-hourly error heatmap and reliability indicators; Data Quality shows provenance and
+limitations.)*
 
 ## 4. Technology stack
 
@@ -70,14 +95,16 @@ absolute-error histogram, and the first page of the delivery data table.)*
                                          ▼
 ┌─────────────────────────────┐   ┌──────────────────────────────────────────┐
 │ Frontend (React SPA)        │   │ Backend (FastAPI, port 8000)             │
-│  KPIs · charts · table      │   │  /health  /api/overview                  │
-│  filters → typed fetch      │──▶│  /api/timeseries  /api/accuracy          │
-│  client.ts (VITE_API_BASE)  │   │  /api/forecasts/latest                   │
-│                             │   │                                          │
-│  Docker: nginx serves SPA   │   │  DataStore (in-memory, TTL 3600 s):      │
-│  + proxies /api,/health     │   │   dedupe → cutoff selection → align      │
-│  (same-origin, no CORS)     │   │   → metrics (matched intervals only)     │
-└─────────────────────────────┘   └──────────────────────────────────────────┘
+│  tabs: KPIs · vintages ·    │   │  /health  /api/overview                  │
+│  heatmap · quality          │──▶│  /api/timeseries  /api/accuracy          │
+│  filters → typed fetch      │   │  /api/forecasts/latest                   │
+│  client.ts (VITE_API_BASE)  │   │  /api/forecasts/vintages                 │
+│                             │   │  /api/data-quality  /api/insights        │
+│  Docker: nginx serves SPA   │   │  /api/export.csv                         │
+│  + proxies /api,/health     │   │  DataStore (in-memory, TTL 3600 s):      │
+│  (same-origin, no CORS)     │   │   dedupe → cutoff selection → align      │
+└─────────────────────────────┘   │   → metrics (matched intervals only)     │
+                                  └──────────────────────────────────────────┘
         │                                        ▲
         │  docker compose (local): nginx proxy   │  CORS (direct cross-origin):
         └────────────────────────────────────────┘  ALLOWED_ORIGINS env var
@@ -111,18 +138,22 @@ Two deployment modes:
 │   │   ├── models/records.py  # internal record types, error = F − A, classify()
 │   │   └── services/
 │   │       ├── elexon_client.py      # httpx client, retries, ElexonError
-│   │       ├── forecast_service.py   # dedupe, cutoff selection, alignment, cache
-│   │       └── metrics_service.py    # MAE/RMSE/bias/MAPE over matched only
-│   └── tests/                 # 55 tests: contracts, metrics, selection, CORS, …
+│   │       ├── forecast_service.py   # dedupe, cutoff selection, alignment, cache, vintages
+│   │       ├── metrics_service.py    # MAE/RMSE/bias/MAPE + median/p90, matched only
+│   │       └── insights_service.py   # deterministic evidence-based insights
+│   └── tests/                 # 71 tests: contracts, metrics, selection, CORS, features, …
 ├── frontend/
 │   ├── Dockerfile             # multi-stage: node build → nginx serve + proxy
 │   ├── nginx.conf.template    # /api + /health proxy, SPA fallback ($BACKEND_URL)
 │   ├── vite.config.ts         # dev proxy :5173 → :8000, vitest config
 │   └── src/
-│       ├── App.tsx            # state, filters, fetch orchestration, layout
+│       ├── App.tsx            # state, filters, tabs, fetch orchestration, layout
 │       ├── api/               # client.ts (typed fetch) + types.ts (schema mirror)
-│       ├── components/        # Header, KpiCards, FilterBar, charts, DataTable, States
+│       ├── components/        # Header, KpiCards, FilterBar, charts, DataTable,
+│       │                      #  TabNav, ForecastExplorer, Heatmap, ReliabilityPanel,
+│       │                      #  DataQualityPanel, Insights, States
 │       ├── lib/aggregate.ts   # chart points, daily means, p90 rule, formatters
+│       ├── lib/heatmap.ts     # heatmap cell prep + colour scale (tested)
 │       ├── integration/live.test.tsx  # opt-in test against a real backend
 │       └── test/setup.ts      # jsdom shims (ResizeObserver, layout, fetch signal)
 ├── scripts/
@@ -272,8 +303,12 @@ All responses are JSON; errors are `{"detail": "…"}` (400 validation, 422 sche
 | GET | `/health` | Liveness, period, cutoff label, cache state (never calls upstream) |
 | GET | `/api/overview` | Headline stats at both grains + selected vintage audit list |
 | GET | `/api/timeseries?start&end&grain` | Aligned rows: `halfhourly` (48/day) or `hourly` (24/day) |
-| GET | `/api/accuracy?start&end&grain` | Metrics over matched intervals + coverage/status counts |
+| GET | `/api/accuracy?start&end&grain` | Metrics over matched intervals + coverage/status counts, median & p90 \|error\*, missing counts |
 | GET | `/api/forecasts/latest?delivery_date` | Eligible-at-cutoff vintage for a day + ignored post-cutoff ones |
+| GET | `/api/forecasts/vintages?date&period` | Every publication covering one half-hour, chronological, with `eligible_at_cutoff`/`selected` flags and Δ vs previous |
+| GET | `/api/data-quality` | Served-dataset provenance: fetched/present/eligible/selected counts, duplicates/nulls, coverage, cache age, limitations |
+| GET | `/api/insights?start&end&grain` | Deterministic evidence-based insights for the range (3–6 findings with numbers) |
+| GET | `/api/export.csv?start&end&grain` | CSV of the filtered rows (same logic as `/api/timeseries`); missing = empty field |
 
 ```bash
 curl "http://127.0.0.1:8000/health"
@@ -281,27 +316,36 @@ curl "http://127.0.0.1:8000/api/overview"
 curl "http://127.0.0.1:8000/api/timeseries?start=2026-01-01&end=2026-01-07&grain=halfhourly"
 curl "http://127.0.0.1:8000/api/accuracy?start=2026-01-01&end=2026-01-31&grain=halfhourly"
 curl "http://127.0.0.1:8000/api/forecasts/latest?delivery_date=2026-01-15"
+curl "http://127.0.0.1:8000/api/forecasts/vintages?date=2026-01-15&period=25"
+curl "http://127.0.0.1:8000/api/data-quality"
+curl "http://127.0.0.1:8000/api/insights?start=2026-01-01&end=2026-01-31"
+curl -OJ "http://127.0.0.1:8000/api/export.csv?start=2026-01-01&end=2026-01-31&grain=halfhourly"
 # force a dataset reload: append &refresh=true to any data endpoint
 ```
+
+\* p90 is reported only with ≥10 matched intervals and is a historical error statistic, not a
+calibrated confidence bound.
 
 ## 16. Tests
 
 ```bash
-# Backend — 55 tests (contracts, metrics, selection rule, alignment, CORS, errors)
+# Backend — 71 tests (contracts, metrics incl. median/p90, selection rule, alignment,
+# vintage explorer, data quality, insights, CSV export, CORS, errors)
 cd backend && ../.venv/bin/python -m pytest
 
-# Frontend — 16 tests (loading/error states, KPI rendering, filters, aggregation, pure funcs)
+# Frontend — 34 tests (loading/error states, KPI rendering, filters, aggregation, tab
+# navigation, explorer/heatmap/quality/insights rendering, heatmap prep, pure funcs)
 cd frontend && npm test
 
-# Opt-in live integration test against a real running backend (17th test)
+# Opt-in live integration test against a real running backend (35th test)
 cd frontend && LIVE=1 VITE_API_BASE=http://127.0.0.1:8000 npm test
 
 # Upstream contract verification (stdlib only, hits the real Elexon API)
 python3 scripts/verify_api.py
 ```
 
-Latest run: backend **55 passed**, frontend **16 passed + 1 gated**, live mode **17 passed**,
-`tsc --noEmit` and `npm run build` clean, pyflakes clean.
+Latest run: backend **71 passed**, frontend **34 passed + 1 gated**, live mode **35 passed**,
+`tsc --noEmit` and `npm run build` clean.
 
 ## 17. Deployment status and URLs
 
@@ -340,6 +384,10 @@ Development was performed with **opencode**, an open-source AI coding agent (mod
   the cutoff on every interval, found and fixed the wildcard-CORS issue, and added CORS tests.
 - **Phase 5/6** — containerization (Dockerfiles, compose, nginx proxy, health checks),
   deployment blueprints, and this README.
+- **Enhancement (Features A–F)** — built the vintage explorer, error heatmap, reliability
+  indicators, data-quality/provenance panel, deterministic evidence-based insights and CSV export
+  on top of the verified pipeline; every calculation stayed in the Python backend, each feature got
+  tests, and the full suite plus Docker stack were re-verified.
 
 Human decisions that shaped the build: the 09:20 UTC cutoff choice, phase-gated scope, platform
 choices, and approval of every phase’s acceptance. AI-generated code was reviewed, tested and
@@ -355,13 +403,19 @@ in this repository.
   ~4 days apart, so labels appear to “descend” (data and tooltips are correct and dated).
 - **Single period, in-memory cache** — one dataset per process (TTL 1 h); a restart re-fetches.
 - **WINDFOR units are an assumption** (MW) — Elexon does not document them.
+- **Insights and percentiles are historical statistics** over the selected range — the insights
+  endpoint is deterministic Python (no AI), and p90 describes past errors; neither is a calibrated
+  confidence bound or a forecast.
+- **Heatmap is half-hourly only** (48 periods × day); the daily view aggregates client-side and
+  is not gridded.
 - **No user-facing persistence** — nothing is stored beyond process memory; no database.
 - Free hosting tiers sleep when idle (first request after idle is slower).
 
 **Future improvements**
 
 - Complete the Vercel + Render deployment (blueprint and CLI steps are ready).
-- Add date/timezone pickers, multi-month ranges, and per-day vintage comparison views.
+- Add date/timezone pickers and multi-month ranges; extend the explorer to side-by-side
+  multi-interval vintage comparison.
 - Persist the dataset (SQLite/Parquet) and add scheduled refresh instead of lazy TTL.
 - Benchmark additional decision cutoffs; add forecast-error decomposition (ramp vs level).
 - CI pipeline (pytest + vitest + docker build) on push.

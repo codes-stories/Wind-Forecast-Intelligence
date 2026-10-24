@@ -25,6 +25,35 @@ def _mean(values: Sequence[float]) -> float | None:
     return sum(values) / len(values)
 
 
+def _median(values: Sequence[float]) -> float | None:
+    """Median; null for an empty sample."""
+    if not values:
+        return None
+    ordered = sorted(values)
+    n = len(ordered)
+    mid = n // 2
+    if n % 2 == 1:
+        return ordered[mid]
+    return (ordered[mid - 1] + ordered[mid]) / 2.0
+
+
+def _p90_nearest_rank(values: Sequence[float]) -> float | None:
+    """90th percentile, nearest-rank (ceil(0.9*n)-th smallest).
+
+    Null when the sample is empty. Callers enforce the minimum sample
+    size for reporting. Historical error statistic, not a confidence bound.
+    """
+    if not values:
+        return None
+    ordered = sorted(values)
+    rank = math.ceil(0.9 * len(ordered))
+    rank = max(1, min(rank, len(ordered)))
+    return ordered[rank - 1]
+
+
+P90_MIN_MATCHED = 10
+
+
 def compute_stats(points: Sequence[IntervalPoint], expected_count: int, grain: str) -> AccuracyStats:
     counts = Counter(p.status for p in points)
     matched = [
@@ -42,6 +71,10 @@ def compute_stats(points: Sequence[IntervalPoint], expected_count: int, grain: s
     rmse = math.sqrt(sum(e * e for e in errors) / len(errors)) if errors else None
     bias = _mean(errors)
 
+    abs_errors = [abs(e) for e in errors]
+    median_abs = _median(abs_errors)
+    p90_abs = _p90_nearest_rank(abs_errors) if n_matched >= P90_MIN_MATCHED else None
+
     pct_errors = [
         abs(p.forecast_mw - p.actual_mw) / abs(p.actual_mw)  # type: ignore[operator]
         for p in matched
@@ -56,6 +89,8 @@ def compute_stats(points: Sequence[IntervalPoint], expected_count: int, grain: s
         "actual_only": counts.get("actual_only", 0),
         "missing_both": counts.get("missing_both", 0),
     }
+    n_missing_actual = status_counts["forecast_only"] + status_counts["missing_both"]
+    n_missing_forecast = status_counts["actual_only"] + status_counts["missing_both"]
 
     avg_forecast = _mean([p.forecast_mw for p in matched])
     avg_actual = _mean([p.actual_mw for p in matched])
@@ -72,6 +107,10 @@ def compute_stats(points: Sequence[IntervalPoint], expected_count: int, grain: s
         bias_mw=round(bias, 3) if bias is not None else None,
         mape_pct=round(mape, 3) if mape is not None else None,
         mape_excluded_intervals=mape_excluded,
+        median_abs_error_mw=round(median_abs, 3) if median_abs is not None else None,
+        p90_abs_error_mw=round(p90_abs, 3) if p90_abs is not None else None,
+        n_missing_actual=n_missing_actual,
+        n_missing_forecast=n_missing_forecast,
         avg_forecast_mw=round(avg_forecast, 3) if avg_forecast is not None else None,
         avg_actual_mw=round(avg_actual, 3) if avg_actual is not None else None,
         status_counts=status_counts,

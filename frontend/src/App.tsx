@@ -1,14 +1,21 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { ApiError, api } from "./api/client";
 import type { AccuracyResponse, HealthResponse, TimeseriesRow } from "./api/types";
+import DataQualityPanel from "./components/DataQualityPanel";
 import FilterBar from "./components/FilterBar";
 import type { Aggregation } from "./components/FilterBar";
 import DataTable from "./components/DataTable";
 import ErrorAnalysis from "./components/ErrorAnalysis";
 import ForecastActualChart from "./components/ForecastActualChart";
+import ForecastExplorer from "./components/ForecastExplorer";
 import Header from "./components/Header";
+import Heatmap from "./components/Heatmap";
+import Insights from "./components/Insights";
 import KpiCards from "./components/KpiCards";
+import ReliabilityPanel from "./components/ReliabilityPanel";
 import { EmptyState, ErrorPanel, LoadingState } from "./components/States";
+import TabNav from "./components/TabNav";
+import type { View } from "./components/TabNav";
 import { toDailyPoints, toHalfhourlyPoints } from "./lib/aggregate";
 
 const DEFAULT_START = "2026-01-01";
@@ -22,6 +29,7 @@ interface Filters {
 
 export default function App() {
   const [health, setHealth] = useState<HealthResponse | null>(null);
+  const [view, setView] = useState<View>("overview");
   const [filters, setFilters] = useState<Filters>({
     start: DEFAULT_START,
     end: DEFAULT_END,
@@ -93,55 +101,85 @@ export default function App() {
 
   const minDate = health?.period_start ?? DEFAULT_START;
   const maxDate = health?.period_end ?? DEFAULT_END;
+  const accuracyGrain = filters.aggregation === "daily" ? "hourly" : "halfhourly";
+  const showFilters = view === "overview" || view === "errors";
+  const rangeReady = !error && !rangeInvalid;
 
   return (
     <div className="min-h-screen">
       <Header health={health} />
       <main className="mx-auto max-w-7xl space-y-4 px-4 py-5 sm:px-6">
-        <FilterBar
-          start={filters.start}
-          end={filters.end}
-          aggregation={filters.aggregation}
-          minDate={minDate}
-          maxDate={maxDate}
-          onChange={updateFilters}
-          onReset={resetFilters}
-        />
+        <TabNav view={view} onChange={setView} />
+
+        {showFilters && (
+          <FilterBar
+            start={filters.start}
+            end={filters.end}
+            aggregation={filters.aggregation}
+            minDate={minDate}
+            maxDate={maxDate}
+            onChange={updateFilters}
+            onReset={resetFilters}
+          />
+        )}
 
         {error && <ErrorPanel message={error} onRetry={retry} />}
 
-        {!error && loading && !accuracy && <LoadingState />}
-
-        {!error && rangeInvalid && (
+        {rangeInvalid && showFilters && (
           <EmptyState message="Fix the date range to load the analysis." />
         )}
 
-        {!error && !rangeInvalid && accuracy && (
+        {view === "overview" && rangeReady && (
           <>
-            <KpiCards stats={accuracy} loading={loading} />
-            <p className="text-xs text-ink-500">
-              Metrics computed by the backend over {accuracy.n_expected} {accuracy.grain} intervals in
-              range ({accuracy.n_matched} matched, coverage {accuracy.coverage_pct.toFixed(1)}%) ·{" "}
-              {accuracy.note}
-            </p>
+            {accuracy ? (
+              <>
+                <KpiCards stats={accuracy} loading={loading} />
+                <p className="text-xs text-ink-500">
+                  Metrics computed by the backend over {accuracy.n_expected} {accuracy.grain} intervals in
+                  range ({accuracy.n_matched} matched, coverage {accuracy.coverage_pct.toFixed(1)}%) ·{" "}
+                  {accuracy.note}
+                </p>
+              </>
+            ) : (
+              loading && <LoadingState />
+            )}
+
+            {points.length === 0 && rows && !loading && (
+              <EmptyState message="No delivery intervals returned for the selected range." />
+            )}
+
+            {points.length > 0 && <ForecastActualChart points={points} aggregation={filters.aggregation} />}
+
+            {accuracy && (
+              <Insights start={filters.start} end={filters.end} grain={accuracyGrain} />
+            )}
+
+            {points.length > 0 && <DataTable points={points} daily={filters.aggregation === "daily"} />}
+
+            {loading && points.length > 0 && <LoadingState label="Updating analysis…" />}
           </>
         )}
 
-        {!error && !rangeInvalid && !loading && points.length === 0 && rows && (
-          <EmptyState message="No delivery intervals returned for the selected range." />
+        {view === "explorer" && !error && (
+          <ForecastExplorer minDate={minDate} maxDate={maxDate} defaultDate={filters.start} />
         )}
 
-        {!error && !rangeInvalid && points.length > 0 && (
+        {view === "errors" && rangeReady && (
           <>
-            <ForecastActualChart points={points} aggregation={filters.aggregation} />
-            <ErrorAnalysis points={points} aggregation={filters.aggregation} />
-            <DataTable points={points} daily={filters.aggregation === "daily"} />
+            {points.length > 0 && <ErrorAnalysis points={points} aggregation={filters.aggregation} />}
+            {rows && rows.length > 0 && <Heatmap rows={rows} />}
+            {accuracy ? (
+              <ReliabilityPanel stats={accuracy} />
+            ) : (
+              loading && <LoadingState label="Loading reliability metrics…" />
+            )}
+            {points.length === 0 && rows && !loading && (
+              <EmptyState message="No delivery intervals returned for the selected range." />
+            )}
           </>
         )}
 
-        {!error && !rangeInvalid && loading && points.length > 0 && (
-          <LoadingState label="Updating analysis…" />
-        )}
+        {view === "quality" && !error && <DataQualityPanel />}
       </main>
 
       <footer className="mx-auto max-w-7xl px-4 pb-8 text-xs leading-relaxed text-ink-500 sm:px-6">

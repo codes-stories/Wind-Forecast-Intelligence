@@ -48,6 +48,23 @@ class AccuracyStats(BaseModel):
     mape_excluded_intervals: int = Field(
         0, description="Matched intervals excluded from MAPE because actual == 0"
     )
+    median_abs_error_mw: Optional[float] = Field(
+        None, description="Median |error| over matched intervals (historical statistic)"
+    )
+    p90_abs_error_mw: Optional[float] = Field(
+        None,
+        description=(
+            "90th percentile (nearest-rank) of |error| over matched intervals; "
+            "historical error statistic, not a calibrated confidence bound; "
+            "null when fewer than 10 matched intervals"
+        ),
+    )
+    n_missing_actual: int = Field(
+        0, description="Intervals where the actual is missing (forecast_only + missing_both)"
+    )
+    n_missing_forecast: int = Field(
+        0, description="Intervals where the forecast is missing (actual_only + missing_both)"
+    )
     avg_forecast_mw: Optional[float]
     avg_actual_mw: Optional[float]
     status_counts: dict[str, int]
@@ -117,3 +134,95 @@ class LatestForecastResponse(BaseModel):
 
 class ErrorDetail(BaseModel):
     detail: str
+
+
+# -- Feature A: historical forecast vintage explorer -------------------------
+
+
+class VintageItem(BaseModel):
+    publish_time: datetime = Field(description="Publication timestamp of this vintage (UTC, never rewritten)")
+    forecast_mw: Optional[float] = Field(None, description="Forecast generation for the delivery hour (MW)")
+    change_mw: Optional[float] = Field(
+        None, description="Change vs the previous publication; null for the earliest vintage"
+    )
+    eligible_at_cutoff: bool = Field(
+        description="publishTime <= decision cutoff on D-1 (eligible for historical evaluation)"
+    )
+    selected: bool = Field(description="The vintage actually used for this interval's accuracy evaluation")
+
+
+class VintageIntervalResponse(BaseModel):
+    delivery_timestamp: datetime
+    settlement_date: date
+    settlement_period: int
+    clock_hour: datetime = Field(description="Hourly forecast key this interval maps to (UTC)")
+    cutoff_utc: datetime = Field(description="Decision cutoff moment for this delivery day (D-1 HH:MM UTC)")
+    actual_mw: Optional[float]
+    selected_publish_time: Optional[datetime]
+    selected_forecast_mw: Optional[float]
+    error_mw: Optional[float] = Field(None, description="selected forecast - actual; null if unmatched")
+    absolute_error_mw: Optional[float]
+    latest_publish_time: Optional[datetime] = Field(
+        None, description="Most recent publication covering this hour (may be after the cutoff)"
+    )
+    latest_forecast_mw: Optional[float]
+    eligible_count: int
+    post_cutoff_count: int
+    vintages: list[VintageItem]
+    limitation: Optional[str] = Field(
+        None, description="Set when no historical publications cover the interval; comparisons are disabled"
+    )
+    note: str
+
+
+# -- Feature D: data quality and provenance ---------------------------------
+
+
+class DataQualityResponse(BaseModel):
+    sources: dict[str, str]
+    period_start: date
+    period_end: date
+    decision_cutoff_utc: str
+    expected_halfhourly_intervals: int
+    actual_records_fetched: int
+    actual_records_present: int
+    forecast_records_fetched: int
+    eligible_forecast_records: int = Field(
+        description="Deduplicated WINDFOR rows published at or before the cutoff for in-period hours"
+    )
+    selected_forecast_records: int = Field(description="Distinct hourly winners used (one per delivery hour)")
+    matched_intervals: int
+    missing_actual_intervals: int
+    missing_forecast_intervals: int
+    coverage_pct: float
+    duplicate_records_dropped: dict[str, int]
+    null_values_in_source: dict[str, int]
+    cache_loaded_at: Optional[datetime]
+    cache_age_seconds: Optional[float]
+    cache_ttl_seconds: int
+    quality_status: str = Field(
+        description="'complete' when every expected interval is matched, else 'incomplete'"
+    )
+    limitations: list[str]
+    note: str
+
+
+# -- Feature E: evidence-based insights -------------------------------------
+
+
+class InsightItem(BaseModel):
+    id: str
+    finding: str
+    evidence: str
+    period: str
+    why_it_matters: str
+    available: bool = True
+    unavailable_reason: Optional[str] = None
+
+
+class InsightsResponse(BaseModel):
+    grain: Grain
+    start: date
+    end: date
+    insights: list[InsightItem]
+    note: str

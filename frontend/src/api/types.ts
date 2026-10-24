@@ -30,6 +30,10 @@ export interface AccuracyStats {
   bias_mw: number | null;
   mape_pct: number | null;
   mape_excluded_intervals: number;
+  median_abs_error_mw: number | null;
+  p90_abs_error_mw: number | null;
+  n_missing_actual: number;
+  n_missing_forecast: number;
   avg_forecast_mw: number | null;
   avg_actual_mw: number | null;
   status_counts: {
@@ -64,4 +68,81 @@ export interface TimeseriesResponse {
   start: string;
   end: string;
   rows: TimeseriesRow[];
+}
+
+// -- Feature A: historical forecast vintage explorer ------------------------
+
+export interface VintageItem {
+  publish_time: string;
+  forecast_mw: number | null;
+  change_mw: number | null;
+  eligible_at_cutoff: boolean;
+  selected: boolean;
+}
+
+export interface VintageIntervalResponse {
+  delivery_timestamp: string;
+  settlement_date: string;
+  settlement_period: number;
+  clock_hour: string;
+  cutoff_utc: string;
+  actual_mw: number | null;
+  selected_publish_time: string | null;
+  selected_forecast_mw: number | null;
+  error_mw: number | null;
+  absolute_error_mw: number | null;
+  latest_publish_time: string | null;
+  latest_forecast_mw: number | null;
+  eligible_count: number;
+  post_cutoff_count: number;
+  vintages: VintageItem[];
+  limitation: string | null;
+  note: string;
+}
+
+// -- Feature D: data quality and provenance ---------------------------------
+
+export interface DataQualityResponse {
+  sources: { actual: string; forecast: string };
+  period_start: string;
+  period_end: string;
+  decision_cutoff_utc: string;
+  expected_halfhourly_intervals: number;
+  actual_records_fetched: number;
+  actual_records_present: number;
+  forecast_records_fetched: number;
+  eligible_forecast_records: number;
+  selected_forecast_records: number;
+  matched_intervals: number;
+  missing_actual_intervals: number;
+  missing_forecast_intervals: number;
+  coverage_pct: number;
+  duplicate_records_dropped: { actual: number; forecast: number };
+  null_values_in_source: { actual: number; forecast: number };
+  cache_loaded_at: string | null;
+  cache_age_seconds: number | null;
+  cache_ttl_seconds: number;
+  quality_status: string;
+  limitations: string[];
+  note: string;
+}
+
+// -- Feature E: evidence-based insights -------------------------------------
+
+export interface InsightItem {
+  id: string;
+  finding: string;
+  evidence: string;
+  period: string;
+  why_it_matters: string;
+  available: boolean;
+  unavailable_reason: string | null;
+}
+
+export interface InsightsResponse {
+  grain: Grain;
+  start: string;
+  end: string;
+  insights: InsightItem[];
+  note: string;
 }

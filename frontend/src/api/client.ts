@@ -1,5 +1,12 @@
 /** Minimal typed fetch client for the Wind Forecast Intelligence API. */
-import type { AccuracyResponse, HealthResponse, TimeseriesResponse } from "./types";
+import type {
+  AccuracyResponse,
+  DataQualityResponse,
+  HealthResponse,
+  InsightsResponse,
+  TimeseriesResponse,
+  VintageIntervalResponse,
+} from "./types";
 
 export class ApiError extends Error {
   readonly status: number;
@@ -49,4 +56,20 @@ export const api = {
       `/api/timeseries?start=${params.start}&end=${params.end}&grain=${params.grain}`,
       signal,
     ),
+  vintages: (params: { date: string; period: number }, signal?: AbortSignal) =>
+    getJson<VintageIntervalResponse>(
+      `/api/forecasts/vintages?date=${params.date}&period=${params.period}`,
+      signal,
+    ),
+  dataQuality: (signal?: AbortSignal) => getJson<DataQualityResponse>("/api/data-quality", signal),
+  insights: (params: { start: string; end: string; grain: string }, signal?: AbortSignal) =>
+    getJson<InsightsResponse>(
+      `/api/insights?start=${params.start}&end=${params.end}&grain=${params.grain}`,
+      signal,
+    ),
 };
+
+/** CSV download URL for the current filters (Feature F - same rows as /api/timeseries). */
+export function exportCsvUrl(params: { start: string; end: string; grain: string }): string {
+  return `${BASE}/api/export.csv?start=${params.start}&end=${params.end}&grain=${params.grain}`;
+}

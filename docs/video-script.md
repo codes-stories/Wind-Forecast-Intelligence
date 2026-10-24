@@ -14,6 +14,8 @@
    (alternatively backend `:8000` + `npm run dev` at `:5173`).
 2. Open an **incognito window** at the dashboard URL; wait for KPIs to load (~5 s first load).
 3. Keep these tabs ready: dashboard · `http://localhost:8000/api/overview` · `backend/app/services/forecast_service.py` · `docker-compose.yml`.
+   The dashboard has four sections: **Overview · Forecast Explorer · Error Analysis · Data Quality**
+   (click through them once before recording so the first load of each is cached).
 4. Record Part 1 and Part 2 separately if easier; splice in order. Keep each part ≤ 5:00.
 
 ---
@@ -41,6 +43,8 @@
   one where the blue line is well above amber.
 - Say: *“Blue is the decision-time forecast; amber is what actually generated. Gaps would mean
   missing data — we never fill them with zero.”*
+- Point at the **What the data shows** cards under the chart: *“And the app states its findings
+  in plain language — each one lists the exact numbers behind it, no black box.”*
 - Optionally switch aggregation to **Daily** and back to show the chart re-render.
 
 ### 2:30–3:30 — MAE, RMSE, bias, coverage in business terms
@@ -58,8 +62,12 @@
 - Read the row: delivery timestamp, forecast, actual, signed error, and
   **Forecast published (UTC)** — e.g. delivery `01 Jan 00:00 UTC` uses the vintage published
   `31 Dec 07:30 UTC`.
+- Switch to the **Forecast Explorer** tab for that interval: the evolution chart plus the
+  publication history table — the selected vintage badged *“selected (at cutoff)”*, later ones
+  *“post-cutoff, excluded”*, and Δ vs the previous publication.
 - Say: *“Every number is traceable to the exact publication an analyst would have seen before
-  the gate closed. Post-cutoff revisions are never used — that's the whole point.”*
+  the gate closed — and you can see the post-cutoff revisions that we deliberately don't use.
+  That's the whole point.”*
 - Point at the availability badge (`matched` / `forecast only`) and the “— means missing, not zero” note.
 
 ### 4:30–5:00 — Value, limitations, next steps
@@ -96,22 +104,29 @@
 - Show `forecast_service.py`: `decision_cutoff_for()` = **09:20 UTC on D−1**, then
   “latest eligible publishTime wins” per delivery hour.
 - Result: for Jan 2026 that's always the **D−1 07:30** vintage — audited **0 violations**
-  across 1,488 intervals; `/api/forecasts/latest` also lists ignored post-cutoff vintages.
+  across 1,488 intervals; `/api/forecasts/latest` also lists ignored post-cutoff vintages, and
+  `/api/forecasts/vintages` returns every publication covering one interval with
+  `eligible_at_cutoff` / `selected` flags (the Forecast Explorer tab renders it).
 - Alignment: hourly forecast mapped to both half-hours; hourly actual = mean of the two
   half-hours, **both required** or the interval is unmatched — no interpolation, no zero-fill.
 - Metrics: MAE/RMSE/bias over **matched intervals only**; bias = mean(F − A) so **positive =
   over-forecast**; MAPE excludes actual = 0 and counts exclusions; coverage always shown.
+  Added reliability indicators: median and p90 of |error| (nearest-rank, ≥10 matched — a
+  historical statistic, labelled *not* a confidence bound) and explicit missing-actual /
+  missing-forecast counts.
 - Independent audit recomputed every metric from `/api/timeseries` and matched the API to 3 decimals.
 
 ### 2:45–3:45 — Code structure, testing, error handling
-- Quick map: `routes.py` (contracts) → `forecast_service` (select/align/cache) →
-  `metrics_service` (statistics); schemas are the single source of truth mirrored in `types.ts`.
-- Tests on screen: `55 passed` (pytest) · `16 passed` (vitest) · optional
-  `LIVE=1 … npm test` → **17th integration test against the real backend**.
+- Quick map: `routes.py` (contracts) → `forecast_service` (select/align/cache/vintages) →
+  `metrics_service` (statistics) → `insights_service` (deterministic findings — no LLM);
+  schemas are the single source of truth mirrored in `types.ts`; heatmap prep lives in
+  `frontend/src/lib/heatmap.ts` (unit-tested, no metric recalculation client-side).
+- Tests on screen: `71 passed` (pytest) · `34 passed` (vitest) · optional
+  `LIVE=1 … npm test` → **35th integration test against the real backend**.
 - Error handling: validation → 400/422 with machine-readable `detail`; upstream failure → 502
   with the real Elexon error; frontend shows a retryable error panel; missing data renders as
-  gaps/“—”, never as zero. CORS restricted to `ALLOWED_ORIGINS` (this audit found and fixed a
-  wildcard-`*` config).
+  gaps/“—”, never as zero (CSV export writes empty fields, never `0`). CORS restricted to
+  `ALLOWED_ORIGINS` (this audit found and fixed a wildcard-`*` config).
 
 ### 3:45–4:30 — Docker and deployment
 - Show `docker compose up --build`; hit `http://localhost:8081` and `:8000/health`.

@@ -21,6 +21,7 @@ from app.models.records import (
     IntervalPoint,
     classify,
 )
+from app.models.schemas import VintageItem
 from app.services.elexon_client import ElexonClient
 
 logger = logging.getLogger(__name__)
@@ -167,6 +168,55 @@ def points_in_range(points: Sequence[IntervalPoint], start: date, end: date) -> 
     return [p for p in points if start <= p.settlement_date <= end]
 
 
+# -- Feature A: historical vintage explorer ---------------------------------
+
+VINTAGES_EMPTY_LIMITATION = (
+    "No historical WINDFOR publications cover this delivery hour; forecast comparisons "
+    "for this interval are unavailable (never backfilled or extrapolated)."
+)
+
+
+def vintages_for_interval(
+    rows: Sequence[ForecastRow],
+    selected: dict[datetime, ForecastRow],
+    interval_start: datetime,
+    cutoff: time,
+) -> tuple[list[VintageItem], datetime, datetime | None]:
+    """All publications covering an interval's clock hour, chronological.
+
+    Returns (items, cutoff_utc, selected_publish_time).  Items carry
+    `eligible_at_cutoff` (publish <= cutoff on D-1) and `selected` (the
+    evaluation winner).  `change_mw` is the delta vs the previous
+    publication; null for the earliest vintage.  Post-cutoff vintages are
+    returned but flagged so the UI never mixes them into historical error.
+    """
+    clock_hour = interval_start.replace(minute=0, second=0, microsecond=0)
+    cutoff_utc = decision_cutoff_for(interval_start, cutoff)
+    winner = selected.get(clock_hour)
+    covering = sorted(
+        (r for r in rows if r.start_time == clock_hour),
+        key=lambda r: r.publish_time,
+    )
+    items: list[VintageItem] = []
+    previous: ForecastRow | None = None
+    for row in covering:
+        change = None
+        if previous is not None and previous.generation_mw is not None and row.generation_mw is not None:
+            change = round(row.generation_mw - previous.generation_mw, 3)
+        items.append(
+            VintageItem(
+                publish_time=row.publish_time,
+                forecast_mw=row.generation_mw,
+                change_mw=change,
+                eligible_at_cutoff=row.publish_time <= cutoff_utc,
+                selected=winner is not None and row.publish_time == winner.publish_time,
+            )
+        )
+        previous = row
+    selected_publish = winner.publish_time if winner is not None else None
+    return items, cutoff_utc, selected_publish
+
+
 class DataStore:
     """Loads the study period once and serves aligned, auditable series."""
 
@@ -221,6 +271,12 @@ class DataStore:
             "forecast_null_values": sum(1 for r in forecasts if r.generation_mw is None),
             "vintages_fetched": len({r.publish_time for r in forecasts}),
             "selected_publish_times": sorted({r.publish_time for r in selected.values()}),
+            "eligible_forecast_rows": sum(
+                1
+                for r in forecasts
+                if s.period_start <= r.start_time.date() <= s.period_end
+                and r.publish_time <= decision_cutoff_for(r.start_time, s.decision_cutoff)
+            ),
         }
         self.loaded_at = datetime.now(timezone.utc)
 

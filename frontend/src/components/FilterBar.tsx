@@ -1,3 +1,5 @@
+import { exportCsvUrl } from "../api/client";
+
 export type Aggregation = "halfhourly" | "daily";
 
 interface Props {
@@ -20,6 +22,7 @@ export default function FilterBar({
   onReset,
 }: Props) {
   const startInvalid = start > end;
+  const exportGrain = aggregation === "daily" ? "hourly" : "halfhourly";
   return (
     <section aria-label="Filters" className="card flex flex-wrap items-end gap-4">
       <div className="flex flex-col gap-1">
@@ -67,6 +70,22 @@ export default function FilterBar({
       <button type="button" className="btn" onClick={onReset}>
         Reset to January 2026
       </button>
+      <a
+        className="btn-primary"
+        href={startInvalid ? undefined : exportCsvUrl({ start, end, grain: exportGrain })}
+        download={startInvalid ? undefined : `wind_forecast_${start}_${end}_${exportGrain}.csv`}
+        aria-disabled={startInvalid || undefined}
+        title={
+          startInvalid
+            ? "Fix the date range before exporting"
+            : `Download the filtered rows as CSV (${exportGrain} grain); missing values are empty, never 0`
+        }
+        onClick={(e) => {
+          if (startInvalid) e.preventDefault();
+        }}
+      >
+        Export CSV
+      </a>
       <p className="ml-auto max-w-md text-xs text-ink-500">
         {startInvalid ? (
           <span role="alert" className="font-medium text-red-600">
