@@ -12,7 +12,9 @@ from fastapi.responses import StreamingResponse
 from app.core.config import Settings, get_settings, normalize_fuel_type
 from app.models.schemas import (
     AccuracyResponse,
+    BenchmarksResponse,
     CacheInfo,
+    CutoffSensitivityResponse,
     DataQualityResponse,
     ForecastRowOut,
     HealthResponse,
@@ -23,7 +25,7 @@ from app.models.schemas import (
     TimeseriesRow,
     VintageIntervalResponse,
 )
-from app.services import forecast_service, insights_service, metrics_service
+from app.services import benchmark_service, forecast_service, insights_service, metrics_service
 from app.services.forecast_service import (
     GRAIN_NOTE,
     SELECTION_RULE,
@@ -43,7 +45,20 @@ DATA_QUALITY_LIMITATIONS = [
     "clock hour (documented mapping, no value substitution).",
     "MAPE excludes intervals where the actual is zero; the exclusion count is reported.",
     "The dataset is cached in memory for the configured TTL; cache age is reported here.",
+    "£ figures are an indicative valuation of error at day-ahead market-index prices "
+    "(APXMIDP), not an imbalance settlement figure.",
 ]
+
+COST_AVAILABLE_NOTE = (
+    "£ figures value each matched interval's error at the day-ahead market-index "
+    "price (APXMIDP) x interval hours: indicative only, not an imbalance "
+    "settlement figure. price_coverage_pct shows how much of the sample is priced."
+)
+
+COST_UNAVAILABLE_NOTE = (
+    "£ valuation unavailable for this range: the day-ahead price feed returned no "
+    "data, so net_error_value_gbp and abs_error_value_gbp are null (never 0)."
+)
 
 
 def _fuel_type(fuel_type: Optional[str], settings: Settings) -> str:
@@ -111,6 +126,10 @@ def _timeseries_rows(store: DataStore, start: date, end: date, grain: GrainParam
             error_mw=p.error_mw,
             status=p.status,  # type: ignore[arg-type]
             forecast_publish_time=p.forecast_publish_time,
+            price_gbp_per_mwh=p.price_gbp_per_mwh,
+            error_value_gbp=(
+                round(p.error_value_gbp, 4) if p.error_value_gbp is not None else None
+            ),
         )
         for p in forecast_service.points_in_range(points, start, end)
     ]
@@ -184,8 +203,9 @@ def accuracy(
     stats = metrics_service.compute_stats(subset, _expected_count(start, end, grain), grain)
     note = (
         "Metrics computed over matched intervals only; see coverage_pct and n_missing. "
-        "MAPE excludes matched intervals where actual == 0 (mape_excluded_intervals)."
+        "MAPE excludes matched intervals where actual == 0 (mape_excluded_intervals). "
     )
+    note += COST_AVAILABLE_NOTE if stats.n_priced_intervals else COST_UNAVAILABLE_NOTE
     return AccuracyResponse(**stats.model_dump(), start=start, end=end, note=note)
 
 
@@ -382,6 +402,7 @@ def data_quality(
         cache_loaded_at=cache.get("loaded_at"),
         cache_age_seconds=cache.get("age_seconds"),
         cache_ttl_seconds=int(cache.get("ttl_seconds", settings.cache_ttl_seconds)),
+        dataset_source=str(store.stats.get("source", "live fetch")),
         quality_status="complete" if matched == expected and expected > 0 else "incomplete",
         limitations=limitations,
         note=(
@@ -423,6 +444,41 @@ def insights(
     )
 
 
+# -- Feature G: decision lab -------------------------------------------------
+
+
+@router.get(
+    "/api/forecasts/cutoff-sensitivity",
+    response_model=CutoffSensitivityResponse,
+    tags=["analysis"],
+)
+def cutoff_sensitivity(
+    start: Optional[date] = Query(None, description="First delivery date (inclusive)"),
+    end: Optional[date] = Query(None, description="Last delivery date (inclusive)"),
+    store: DataStore = Depends(get_store_dep),
+    settings: Settings = Depends(get_settings),
+) -> CutoffSensitivityResponse:
+    """What the hourly accuracy would have been at candidate decision cutoffs.
+
+    Re-runs the documented selection rule with each candidate cutoff time on
+    D-1 over the requested range - a historical what-if, not a recommendation.
+    """
+    start, end = _validate_range(start, end, settings)
+    return benchmark_service.cutoff_sensitivity(store, start, end, settings)
+
+
+@router.get("/api/benchmarks", response_model=BenchmarksResponse, tags=["analysis"])
+def benchmarks(
+    start: Optional[date] = Query(None, description="First delivery date (inclusive)"),
+    end: Optional[date] = Query(None, description="Last delivery date (inclusive)"),
+    store: DataStore = Depends(get_store_dep),
+    settings: Settings = Depends(get_settings),
+) -> BenchmarksResponse:
+    """Envelope calibration (pre-cutoff vintage spread) + skill vs persistence."""
+    start, end = _validate_range(start, end, settings)
+    return benchmark_service.benchmarks(store, start, end, settings)
+
+
 # -- Feature F: analyst CSV export -------------------------------------------
 
 
@@ -434,6 +490,8 @@ _CSV_HEADER = [
     "signed_error_mw",
     "absolute_error_mw",
     "status",
+    "day_ahead_price_gbp_per_mwh",
+    "error_value_gbp",
 ]
 
 
@@ -476,6 +534,8 @@ def export_csv(
                 _csv_num(row.error_mw),
                 _csv_num(abs_err),
                 row.status,
+                _csv_num(row.price_gbp_per_mwh),
+                _csv_num(row.error_value_gbp),
             ]
         )
     filename = f"wind_forecast_{start.isoformat()}_{end.isoformat()}_{grain}.csv"

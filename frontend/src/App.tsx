@@ -1,7 +1,9 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { ApiError, api } from "./api/client";
 import type { AccuracyResponse, HealthResponse, TimeseriesRow } from "./api/types";
+import CostPanel from "./components/CostPanel";
 import DataQualityPanel from "./components/DataQualityPanel";
+import DecisionLab from "./components/DecisionLab";
 import FilterBar from "./components/FilterBar";
 import type { Aggregation } from "./components/FilterBar";
 import DataTable from "./components/DataTable";
@@ -20,6 +22,8 @@ import { toDailyPoints, toHalfhourlyPoints } from "./lib/aggregate";
 
 const DEFAULT_START = "2026-01-01";
 const DEFAULT_END = "2026-01-31";
+const DATE_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
+const VALID_TABS: View[] = ["overview", "explorer", "errors", "lab", "quality"];
 
 interface Filters {
   start: string;
@@ -27,14 +31,28 @@ interface Filters {
   aggregation: Aggregation;
 }
 
+/** Deep links: ?start=&end=&agg=&tab= reopen an exact view (see Copy view link). */
+function readInitialState(): { filters: Filters; view: View } {
+  const params = new URLSearchParams(window.location.search);
+  const start = params.get("start");
+  const end = params.get("end");
+  const agg = params.get("agg");
+  const tab = params.get("tab") as View | null;
+  return {
+    filters: {
+      start: start && DATE_PATTERN.test(start) ? start : DEFAULT_START,
+      end: end && DATE_PATTERN.test(end) ? end : DEFAULT_END,
+      aggregation: agg === "daily" ? "daily" : "halfhourly",
+    },
+    view: tab && VALID_TABS.includes(tab) ? tab : "overview",
+  };
+}
+
 export default function App() {
+  const initial = useMemo(readInitialState, []);
   const [health, setHealth] = useState<HealthResponse | null>(null);
-  const [view, setView] = useState<View>("overview");
-  const [filters, setFilters] = useState<Filters>({
-    start: DEFAULT_START,
-    end: DEFAULT_END,
-    aggregation: "halfhourly",
-  });
+  const [view, setView] = useState<View>(initial.view);
+  const [filters, setFilters] = useState<Filters>(initial.filters);
   const [accuracy, setAccuracy] = useState<AccuracyResponse | null>(null);
   const [rows, setRows] = useState<TimeseriesRow[] | null>(null);
   const [loading, setLoading] = useState(true);
@@ -55,6 +73,21 @@ export default function App() {
   }, []);
 
   const rangeInvalid = filters.start > filters.end;
+
+  // Keep the address bar in sync so the current view is always shareable.
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    params.set("start", filters.start);
+    params.set("end", filters.end);
+    params.set("agg", filters.aggregation);
+    params.set("tab", view);
+    const query = params.toString();
+    window.history.replaceState(
+      null,
+      "",
+      `${window.location.pathname}${query ? `?${query}` : ""}`,
+    );
+  }, [filters, view]);
 
   useEffect(() => {
     if (rangeInvalid) {
@@ -102,7 +135,7 @@ export default function App() {
   const minDate = health?.period_start ?? DEFAULT_START;
   const maxDate = health?.period_end ?? DEFAULT_END;
   const accuracyGrain = filters.aggregation === "daily" ? "hourly" : "halfhourly";
-  const showFilters = view === "overview" || view === "errors";
+  const showFilters = view === "overview" || view === "errors" || view === "lab";
   const rangeReady = !error && !rangeInvalid;
 
   return (
@@ -144,6 +177,8 @@ export default function App() {
               loading && <LoadingState />
             )}
 
+            {accuracy && rows && rows.length > 0 && <CostPanel rows={rows} stats={accuracy} />}
+
             {points.length === 0 && rows && !loading && (
               <EmptyState message="No delivery intervals returned for the selected range." />
             )}
@@ -177,6 +212,10 @@ export default function App() {
               <EmptyState message="No delivery intervals returned for the selected range." />
             )}
           </>
+        )}
+
+        {view === "lab" && rangeReady && (
+          <DecisionLab start={filters.start} end={filters.end} />
         )}
 
         {view === "quality" && !error && <DataQualityPanel />}

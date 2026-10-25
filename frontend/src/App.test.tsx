@@ -4,6 +4,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import App from "./App";
 import type {
   AccuracyResponse,
+  BenchmarksResponse,
+  CutoffSensitivityResponse,
   DataQualityResponse,
   HealthResponse,
   InsightsResponse,
@@ -47,6 +49,11 @@ const accuracy: AccuracyResponse = {
   avg_forecast_mw: 13000,
   avg_actual_mw: 12750,
   status_counts: { matched: 730, forecast_only: 6, actual_only: 8, missing_both: 0 },
+  n_priced_intervals: 730,
+  price_coverage_pct: 100,
+  net_error_value_gbp: 120000000,
+  abs_error_value_gbp: 150000000,
+  price_source: "Elexon market-index day-ahead mid price (APXMIDP, £/MWh)",
   start: "2026-01-01",
   end: "2026-01-31",
   note: "Metrics computed over matched intervals only.",
@@ -66,16 +73,20 @@ const timeseries: TimeseriesResponse = {
       error_mw: 1000,
       status: "matched",
       forecast_publish_time: "2025-12-31T07:30:00Z",
+      price_gbp_per_mwh: 60,
+      error_value_gbp: 30000, // 1000 MW x GBP60 x 0.5 h
     },
     {
       timestamp: "2026-01-01T00:30:00Z",
       settlement_date: "2026-01-01",
       settlement_period: 2,
-      actual_mw: 10200,
+      actual_mw: 11200,
       forecast_mw: 11000,
-      error_mw: 800,
+      error_mw: -200,
       status: "matched",
       forecast_publish_time: "2025-12-31T07:30:00Z",
+      price_gbp_per_mwh: 50,
+      error_value_gbp: -5000, // -200 MW x GBP50 x 0.5 h
     },
     {
       timestamp: "2026-01-02T00:00:00Z",
@@ -86,6 +97,8 @@ const timeseries: TimeseriesResponse = {
       error_mw: null,
       status: "forecast_only",
       forecast_publish_time: "2026-01-01T07:30:00Z",
+      price_gbp_per_mwh: null,
+      error_value_gbp: null,
     },
   ],
 };
@@ -185,6 +198,50 @@ const insights: InsightsResponse = {
   note: "Every insight lists the numbers behind it (evidence).",
 };
 
+const cutoffSensitivity: CutoffSensitivityResponse = {
+  start: "2026-01-01",
+  end: "2026-01-31",
+  current_cutoff_utc: "09:20",
+  candidates: [
+    { cutoff_utc: "07:30", is_current: false, mae_mw: 2100, rmse_mw: 3400, bias_mw: 250, n_matched: 730, coverage_pct: 98.1, delta_mae_mw: 24.0 },
+    { cutoff_utc: "09:20", is_current: true, mae_mw: 2076, rmse_mw: 3350, bias_mw: 250, n_matched: 730, coverage_pct: 98.1, delta_mae_mw: 0 },
+    { cutoff_utc: "22:30", is_current: false, mae_mw: 1870, rmse_mw: 3100, bias_mw: 200, n_matched: 730, coverage_pct: 98.1, delta_mae_mw: -206 },
+  ],
+  best_cutoff_utc: "22:30",
+  best_delta_mae_mw: -206,
+  rule: "MAE over matched half-hourly intervals; top publish times of day plus the configured cutoff",
+  note: "Historical what-if: each candidate re-runs the same selection rule with the cutoff moved.",
+  limitation: null,
+};
+
+const benchmarks: BenchmarksResponse = {
+  start: "2026-01-01",
+  end: "2026-01-31",
+  current_cutoff_utc: "09:20",
+  calibration: {
+    hours_total: 744,
+    hours_evaluated: 700,
+    hours_inside: 149,
+    hours_below: 520,
+    hours_above: 31,
+    inside_pct: 21.3,
+    avg_envelope_width_mw: 1868.6,
+    avg_vintages_per_hour: 10.1,
+    limitation: "The min-max envelope uses only vintages published before the cutoff.",
+  },
+  skill: {
+    grain: "halfhourly",
+    n_matched: 730,
+    n_evaluated: 700,
+    n_persistence_unavailable: 30,
+    windfor_mae_mw: 1500,
+    persistence_mae_mw: 2400,
+    skill_pct: 37.5,
+    note: "Persistence = actual from 24 hours earlier at the same half-hour.",
+  },
+  note: "Benchmarks are computed by the backend over the selected range.",
+};
+
 const fetchMock = vi.fn();
 
 function mockApi() {
@@ -193,7 +250,9 @@ function mockApi() {
     if (url.includes("/health")) return jsonResponse(health);
     if (url.includes("/api/accuracy")) return jsonResponse(accuracy);
     if (url.includes("/api/timeseries")) return jsonResponse(timeseries);
+    if (url.includes("/api/forecasts/cutoff-sensitivity")) return jsonResponse(cutoffSensitivity);
     if (url.includes("/api/forecasts/vintages")) return jsonResponse(vintages);
+    if (url.includes("/api/benchmarks")) return jsonResponse(benchmarks);
     if (url.includes("/api/data-quality")) return jsonResponse(dataQuality);
     if (url.includes("/api/insights")) return jsonResponse(insights);
     return jsonResponse({ detail: "not found" }, 404);
@@ -204,6 +263,7 @@ function mockApi() {
 beforeEach(() => {
   vi.restoreAllMocks();
   vi.unstubAllGlobals();
+  window.history.replaceState(null, "", "/"); // jsdom window persists across tests
   mockApi();
 });
 
@@ -324,10 +384,16 @@ describe("Filters", () => {
 });
 
 describe("Section navigation and new features", () => {
-  it("renders the four analysis sections as tabs", async () => {
+  it("renders the five analysis sections as tabs", async () => {
     render(<App />);
     await screen.findByText("13,000 MW");
-    for (const name of ["Overview", "Forecast Explorer", "Error Analysis", "Data Quality"]) {
+    for (const name of [
+      "Overview",
+      "Forecast Explorer",
+      "Error Analysis",
+      "Decision Lab",
+      "Data Quality",
+    ]) {
       expect(screen.getByRole("tab", { name })).toBeInTheDocument();
     }
     expect(screen.getByRole("tab", { name: "Overview" })).toHaveAttribute("aria-selected", "true");
@@ -407,5 +473,107 @@ describe("Section navigation and new features", () => {
         "/api/export.csv?start=2026-01-01&end=2026-01-31&grain=hourly",
       );
     });
+  });
+});
+
+describe("Cost panel (£ value of error)", () => {
+  it("shows headline totals derived from the priced rows plus the disclaimer", async () => {
+    render(<App />);
+    expect(await screen.findByRole("heading", { name: "Value of forecast error (£)" })).toBeInTheDocument();
+    // abs = |30000| + |-5000| ; net = 30000 - 5000 (rows carry price x error x hours)
+    expect(screen.getByText("£35k")).toBeInTheDocument(); // absolute value headline
+    expect(screen.getByText("£25k")).toBeInTheDocument(); // net signed headline
+    expect(screen.getByText(/not an imbalance settlement figure/)).toBeInTheDocument();
+    expect(screen.getByText(/730 priced of 730 matched intervals \(100\.0% price coverage\)/)).toBeInTheDocument();
+    expect(
+      screen.getByRole("img", { name: "Bar chart of the daily pound value of forecast error" }),
+    ).toBeInTheDocument();
+  });
+
+  it("stays hidden when the backend reports no price feed", async () => {
+    fetchMock.mockImplementation((input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.includes("/health")) return jsonResponse(health);
+      if (url.includes("/api/accuracy")) {
+        return jsonResponse({ ...accuracy, abs_error_value_gbp: null, net_error_value_gbp: null, n_priced_intervals: 0, price_coverage_pct: null });
+      }
+      if (url.includes("/api/timeseries")) return jsonResponse(timeseries);
+      if (url.includes("/api/data-quality")) return jsonResponse(dataQuality);
+      if (url.includes("/api/insights")) return jsonResponse(insights);
+      return jsonResponse({ detail: "not found" }, 404);
+    });
+    render(<App />);
+    expect(await screen.findByText("13,000 MW")).toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: "Value of forecast error (£)" })).not.toBeInTheDocument();
+  });
+});
+
+describe("Decision Lab", () => {
+  it("loads cutoff sensitivity and benchmarks and renders both cards", async () => {
+    const user = userEvent.setup();
+    render(<App />);
+    await screen.findByText("13,000 MW");
+    fetchMock.mockClear();
+    await user.click(screen.getByRole("tab", { name: "Decision Lab" }));
+
+    expect(await screen.findByRole("heading", { name: "Decision cutoff sensitivity" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Envelope calibration" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Skill vs persistence" })).toBeInTheDocument();
+    // best-cutoff what-if, explicitly caveated
+    expect(screen.getByText(/Lowest MAE on this range/)).toBeInTheDocument();
+    expect(screen.getByText(/not a recommendation/)).toBeInTheDocument();
+    expect(screen.getByText("+37.5%")).toBeInTheDocument(); // skill vs persistence
+    expect(screen.getByText("21.3%")).toBeInTheDocument(); // inside-envelope share
+    const urls = fetchMock.mock.calls.map((c) => String(c[0]));
+    expect(urls.some((u) => u.includes("/api/forecasts/cutoff-sensitivity") && u.includes("start=2026-01-01"))).toBe(true);
+    expect(urls.some((u) => u.includes("/api/benchmarks") && u.includes("end=2026-01-31"))).toBe(true);
+    // overview content is not rendered on this tab
+    expect(screen.queryByText("13,000 MW")).not.toBeInTheDocument();
+  });
+});
+
+describe("Deep links and copy", () => {
+  it("reopens a shared link with dates, aggregation and tab", async () => {
+    window.history.replaceState(null, "", "/?start=2026-01-10&end=2026-01-20&agg=daily&tab=errors");
+    render(<App />);
+    expect(await screen.findByText("Forecast error heatmap")).toBeInTheDocument(); // errors tab opened
+    expect(screen.getByLabelText("From (delivery date)")).toHaveValue("2026-01-10");
+    expect(screen.getByLabelText("To (delivery date)")).toHaveValue("2026-01-20");
+    expect(screen.getByLabelText("Aggregation")).toHaveValue("daily");
+    expect(screen.getByRole("tab", { name: "Error Analysis" })).toHaveAttribute("aria-selected", "true");
+  });
+
+  it("falls back to defaults for invalid deep-link params", async () => {
+    window.history.replaceState(null, "", "/?start=not-a-date&tab=nope");
+    render(<App />);
+    expect(await screen.findByText("13,000 MW")).toBeInTheDocument();
+    expect(screen.getByLabelText("From (delivery date)")).toHaveValue("2026-01-01");
+    expect(screen.getByRole("tab", { name: "Overview" })).toHaveAttribute("aria-selected", "true");
+  });
+
+  it("keeps the address bar in sync with filters and the active tab", async () => {
+    const user = userEvent.setup();
+    render(<App />);
+    await screen.findByText("13,000 MW");
+    fireEvent.change(screen.getByLabelText("From (delivery date)"), { target: { value: "2026-01-15" } });
+    await waitFor(() => expect(window.location.search).toContain("start=2026-01-15"));
+    await user.click(screen.getByRole("tab", { name: "Forecast Explorer" }));
+    await waitFor(() => expect(window.location.search).toContain("tab=explorer"));
+    expect(window.location.search).toContain("agg=halfhourly");
+  });
+
+  it("copies the current view link to the clipboard", async () => {
+    const user = userEvent.setup();
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    Object.defineProperty(window.navigator, "clipboard", {
+      value: { writeText },
+      configurable: true,
+    });
+    render(<App />);
+    await screen.findByText("13,000 MW");
+    await user.click(screen.getByRole("button", { name: "Copy view link" }));
+    expect(writeText).toHaveBeenCalledWith(expect.stringContaining("tab=overview"));
+    // aria-label keeps the accessible name stable; the visible label flips to "Copied"
+    expect(await screen.findByText("Copied")).toBeInTheDocument();
   });
 });

@@ -14,6 +14,7 @@ export interface HealthResponse {
     loaded_at: string | null;
     age_seconds: number | null;
     ttl_seconds: number;
+    source?: string;
     refresh: string;
     endpoint_refresh_param: string;
   };
@@ -43,6 +44,13 @@ export interface AccuracyStats {
     actual_only: number;
     missing_both: number;
   };
+  // Indicative £ valuation (day-ahead market-index price); optional so the
+  // UI degrades cleanly when the price feed is unavailable.
+  n_priced_intervals?: number;
+  price_coverage_pct?: number;
+  net_error_value_gbp?: number | null;
+  abs_error_value_gbp?: number | null;
+  price_source?: string | null;
 }
 
 export interface AccuracyResponse extends AccuracyStats {
@@ -62,6 +70,8 @@ export interface TimeseriesRow {
   error_mw: number | null;
   status: IntervalStatus;
   forecast_publish_time: string | null;
+  price_gbp_per_mwh?: number | null;
+  error_value_gbp?: number | null;
 }
 
 export interface TimeseriesResponse {
@@ -125,6 +135,7 @@ export interface DataQualityResponse {
   cache_loaded_at: string | null;
   cache_age_seconds: number | null;
   cache_ttl_seconds: number;
+  dataset_source?: string;
   quality_status: string;
   limitations: string[];
   note: string;
@@ -147,5 +158,62 @@ export interface InsightsResponse {
   start: string;
   end: string;
   insights: InsightItem[];
+  note: string;
+}
+
+// -- Feature G: decision lab -------------------------------------------------
+
+export interface CutoffCandidate {
+  cutoff_utc: string;
+  is_current: boolean;
+  mae_mw: number | null;
+  rmse_mw: number | null;
+  bias_mw: number | null;
+  n_matched: number;
+  coverage_pct: number;
+  delta_mae_mw: number | null;
+}
+
+export interface CutoffSensitivityResponse {
+  start: string;
+  end: string;
+  current_cutoff_utc: string;
+  candidates: CutoffCandidate[];
+  best_cutoff_utc: string | null;
+  best_delta_mae_mw: number | null;
+  rule: string;
+  note: string;
+  limitation: string | null;
+}
+
+export interface CalibrationStats {
+  hours_total: number;
+  hours_evaluated: number;
+  hours_inside: number;
+  hours_below: number;
+  hours_above: number;
+  inside_pct: number | null;
+  avg_envelope_width_mw: number | null;
+  avg_vintages_per_hour: number | null;
+  limitation: string;
+}
+
+export interface SkillStats {
+  grain: Grain;
+  n_matched: number;
+  n_evaluated: number;
+  n_persistence_unavailable: number;
+  windfor_mae_mw: number | null;
+  persistence_mae_mw: number | null;
+  skill_pct: number | null;
+  note: string;
+}
+
+export interface BenchmarksResponse {
+  start: string;
+  end: string;
+  current_cutoff_utc: string;
+  calibration: CalibrationStats;
+  skill: SkillStats;
   note: string;
 }

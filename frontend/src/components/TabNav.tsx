@@ -1,4 +1,4 @@
-export type View = "overview" | "explorer" | "errors" | "quality";
+export type View = "overview" | "explorer" | "errors" | "lab" | "quality";
 
 interface Props {
   view: View;
@@ -9,6 +9,7 @@ const TABS: { id: View; label: string; description: string }[] = [
   { id: "overview", label: "Overview", description: "Headline accuracy, chart, insights and data table" },
   { id: "explorer", label: "Forecast Explorer", description: "Every forecast vintage behind one delivery interval" },
   { id: "errors", label: "Error Analysis", description: "Error charts, heatmap and reliability metrics" },
+  { id: "lab", label: "Decision Lab", description: "Cutoff sensitivity, envelope calibration and skill vs persistence" },
   { id: "quality", label: "Data Quality", description: "Sources, completeness, cache and limitations" },
 ];
 

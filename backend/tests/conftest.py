@@ -7,7 +7,7 @@ from datetime import date, datetime, time, timedelta, timezone
 import pytest
 
 from app.core.config import Settings
-from app.models.records import ActualRow, ForecastRow
+from app.models.records import ActualRow, ForecastRow, PriceRow
 from app.services.forecast_service import DataStore
 
 UTC = timezone.utc
@@ -46,15 +46,27 @@ def make_forecast(publish: datetime, start: datetime, mw) -> ForecastRow:
     return ForecastRow(publish_time=publish, start_time=start, generation_mw=mw)
 
 
+def make_price(day: date, sp: int, price: float) -> PriceRow:
+    start = datetime(day.year, day.month, day.day, tzinfo=UTC) + timedelta(minutes=30 * (sp - 1))
+    return PriceRow(
+        settlement_date=day,
+        settlement_period=sp,
+        start_time=start,
+        price_gbp_per_mwh=price,
+    )
+
+
 class FakeClient:
     """Returns pre-loaded synthetic rows; can simulate upstream failures."""
 
-    def __init__(self, actuals=(), forecasts=(), error: Exception | None = None):
+    def __init__(self, actuals=(), forecasts=(), error: Exception | None = None, prices=()):
         self.actuals = list(actuals)
         self.forecasts = list(forecasts)
+        self.prices = list(prices)
         self.error = error
         self.requested_fuel_types: list[str] = []
         self.forecast_calls = 0
+        self.price_calls = 0
 
     def fetch_actuals(
         self, start: date, end: date, fuel_type: str | None = None
@@ -69,6 +81,13 @@ class FakeClient:
         if self.error is not None:
             raise self.error
         return [r for r in self.forecasts if publish_from <= r.publish_time <= publish_to]
+
+    def fetch_prices(self, start: date, end: date) -> list[PriceRow]:
+        """Price feed: raises `error` too, so failure paths can be exercised."""
+        self.price_calls += 1
+        if self.error is not None:
+            raise self.error
+        return [r for r in self.prices if start <= r.settlement_date <= end]
 
 
 def synth_period(
@@ -95,10 +114,11 @@ def synth_period(
 
 
 def loaded_store(
-    actuals=(), forecasts=(), settings: Settings | None = None, fuel_type: str | None = None
+    actuals=(), forecasts=(), settings: Settings | None = None,
+    fuel_type: str | None = None, prices=(),
 ) -> DataStore:
     settings = settings or make_settings()
-    store = DataStore(FakeClient(actuals, forecasts), settings, fuel_type)
+    store = DataStore(FakeClient(actuals, forecasts, prices=prices), settings, fuel_type)
     store.load()
     return store
 

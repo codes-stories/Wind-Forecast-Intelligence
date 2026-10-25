@@ -19,9 +19,11 @@ from app.models.records import (
     ActualRow,
     ForecastRow,
     IntervalPoint,
+    PriceRow,
     classify,
 )
 from app.models.schemas import VintageItem
+from app.services import snapshot_service
 from app.services.elexon_client import ElexonClient
 
 logger = logging.getLogger(__name__)
@@ -44,9 +46,14 @@ class ElexonFetchClient(Protocol):
 
     def fetch_forecasts(self, publish_from: datetime, publish_to: datetime) -> list[ForecastRow]: ...
 
+    def fetch_prices(self, start: date, end: date) -> list[PriceRow]: ...
+
 
 # WINDFOR publishes wind only: any other FUELHH fuel has actuals but no forecast.
 FORECAST_FUEL = "WIND"
+
+# (settlementDate, settlementPeriod) -> day-ahead mid price in £/MWh
+PriceMap = dict[tuple[date, int], float]
 
 
 def decision_cutoff_for(interval_start: datetime, cutoff: time) -> datetime:
@@ -104,12 +111,24 @@ def dedupe_forecasts(rows: Sequence[ForecastRow]) -> tuple[list[ForecastRow], in
     return sorted(best.values(), key=lambda r: (r.publish_time, r.start_time)), dropped
 
 
+def _hourly_price(day: date, hour: int, prices: PriceMap) -> float | None:
+    """Price for an hourly point: mean of the clock hour's available half-hour prices."""
+    p1 = prices.get((day, hour * 2 + 1))
+    p2 = prices.get((day, hour * 2 + 2))
+    values = [v for v in (p1, p2) if v is not None]
+    if not values:
+        return None
+    return sum(values) / len(values)
+
+
 def build_hourly_points(
     period_start: date,
     period_end: date,
     actual_by_start: dict[datetime, ActualRow],
     selected: dict[datetime, ForecastRow],
+    prices: PriceMap | None = None,
 ) -> list[IntervalPoint]:
+    prices = prices or {}
     points: list[IntervalPoint] = []
     day = period_start
     while day <= period_end:
@@ -132,6 +151,7 @@ def build_hourly_points(
                     forecast_mw=forecast_mw,
                     status=classify(forecast_mw is not None, actual is not None),
                     forecast_publish_time=forecast.publish_time if forecast else None,
+                    price_gbp_per_mwh=_hourly_price(day, hour, prices),
                 )
             )
         day += timedelta(days=1)
@@ -143,7 +163,9 @@ def build_halfhourly_points(
     period_end: date,
     actual_by_start: dict[datetime, ActualRow],
     selected: dict[datetime, ForecastRow],
+    prices: PriceMap | None = None,
 ) -> list[IntervalPoint]:
+    prices = prices or {}
     points: list[IntervalPoint] = []
     day = period_start
     while day <= period_end:
@@ -164,6 +186,7 @@ def build_halfhourly_points(
                     forecast_mw=forecast_mw,
                     status=classify(forecast_mw is not None, actual is not None),
                     forecast_publish_time=forecast.publish_time if forecast else None,
+                    price_gbp_per_mwh=prices.get((day, period)),
                 )
             )
         day += timedelta(days=1)
@@ -239,6 +262,7 @@ class DataStore:
         self.selected: dict[datetime, ForecastRow] = {}
         self.forecast_rows: list[ForecastRow] = []
         self.actual_rows: list[ActualRow] = []
+        self.prices: PriceMap = {}
 
     @property
     def forecast_available(self) -> bool:
@@ -254,7 +278,31 @@ class DataStore:
             return None
         return (datetime.now(timezone.utc) - self.loaded_at).total_seconds()
 
+    # -- price feed --------------------------------------------------------
+    def _fetch_price_map(self) -> PriceMap:
+        """Day-ahead prices for the period; any failure degrades to no prices.
+
+        The £ valuation is an optional layer: an outage or schema change in
+        the market-index endpoint must never take down the dataset itself.
+        """
+        s = self.settings
+        if not s.prices_enabled:
+            return {}
+        fetch = getattr(self.client, "fetch_prices", None)
+        if fetch is None:
+            return {}
+        try:
+            rows = fetch(s.period_start, s.period_end)
+        except Exception as exc:  # noqa: BLE001 - degradation is the point
+            logger.warning("price feed unavailable, £ valuation disabled: %s", exc)
+            return {}
+        prices = {(r.settlement_date, r.settlement_period): r.price_gbp_per_mwh for r in rows}
+        logger.info("fetched %s day-ahead price points", len(prices))
+        return prices
+
+    # -- load paths --------------------------------------------------------
     def load(self) -> None:
+        """Live fetch from Elexon (actuals, forecasts, prices) then ingest."""
         s = self.settings
         actuals_raw = self.client.fetch_actuals(s.period_start, s.period_end, self.fuel_type)
         if self.forecast_available:
@@ -273,7 +321,28 @@ class DataStore:
             self.fuel_type,
             len(forecasts_raw),
         )
+        self._ingest(actuals_raw, forecasts_raw, self._fetch_price_map(), source="live fetch")
 
+    def load_snapshot(self, payload: dict) -> None:
+        """Cold start from the shipped snapshot file (no network calls)."""
+        actuals_raw, forecasts_raw, prices = snapshot_service.decode(payload)
+        generated = payload.get("generated_at", "unknown time")
+        self._ingest(
+            actuals_raw,
+            forecasts_raw,
+            prices,
+            source=f"shipped snapshot (generated {generated}; ?refresh=true fetches live)",
+        )
+
+    def _ingest(
+        self,
+        actuals_raw: list[ActualRow],
+        forecasts_raw: list[ForecastRow],
+        prices: PriceMap,
+        source: str,
+    ) -> None:
+        """Dedupe, select, align and price-stamp raw rows. Shared by every load path."""
+        s = self.settings
         actuals, actual_dupes = dedupe_actuals(actuals_raw)
         forecasts, forecast_dupes = dedupe_forecasts(forecasts_raw)
         selected = select_decision_time_forecasts(
@@ -284,13 +353,18 @@ class DataStore:
         self.actual_rows = actuals
         self.forecast_rows = forecasts
         self.selected = selected
-        self.hourly = build_hourly_points(s.period_start, s.period_end, actual_by_start, selected)
+        self.prices = prices
+        self.hourly = build_hourly_points(
+            s.period_start, s.period_end, actual_by_start, selected, prices
+        )
         self.halfhourly = build_halfhourly_points(
-            s.period_start, s.period_end, actual_by_start, selected
+            s.period_start, s.period_end, actual_by_start, selected, prices
         )
         self.stats = {
             "fuel_type": self.fuel_type,
             "forecast_available": self.forecast_available,
+            "source": source,
+            "price_points_fetched": len(prices),
             "actual_rows_fetched": len(actuals_raw),
             "forecast_rows_fetched": len(forecasts_raw),
             "actual_duplicates_dropped": actual_dupes,
@@ -328,6 +402,15 @@ def get_store(
     Cache policy: in-process, one row-set per fuel type for the whole study
     period, TTL = settings.cache_ttl_seconds, forced reload via ?refresh=true.
     No database: the dataset is ~1488 actual + ~18.7k forecast rows.
+
+    Load order for a cold/stale store:
+      1. refresh=true -> always a live Elexon fetch (bypasses the snapshot),
+      2. otherwise the shipped snapshot when it exists and matches the
+         configured period/fuel (the reporting period is closed, so the
+         frozen rows are the same rows Elexon would return),
+      3. otherwise a live fetch. Any snapshot load failure falls through
+         to (3) - the snapshot can only ever make startup faster, never
+         change what is served incorrectly.
     """
     fuel = normalize_fuel_type(fuel_type or settings.fuel_type)
     with _lock:
@@ -337,7 +420,11 @@ def get_store(
             stale = (store.age_seconds() or 0) > settings.cache_ttl_seconds
         if refresh or stale:
             store = build_store(settings, fuel)
-            store.load()  # ElexonError propagates -> 502 handler
+            payload = None if refresh else snapshot_service.load(settings)
+            if payload is not None:
+                store.load_snapshot(payload)
+            else:
+                store.load()  # ElexonError propagates -> 502 handler
             _stores[fuel] = store
         return store
 
@@ -347,12 +434,17 @@ def cache_status(settings: Settings, fuel_type: str | None = None) -> dict:
     with _lock:
         store = _stores.get(fuel)
         if store is None or not store.is_loaded:
-            return {"loaded": False, "ttl_seconds": settings.cache_ttl_seconds}
+            return {
+                "loaded": False,
+                "ttl_seconds": settings.cache_ttl_seconds,
+                "source": "not loaded",
+            }
         return {
             "loaded": True,
             "loaded_at": store.loaded_at,
             "age_seconds": round(store.age_seconds() or 0, 1),
             "ttl_seconds": settings.cache_ttl_seconds,
+            "source": str(store.stats.get("source", "live fetch")),
         }
 
 

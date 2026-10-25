@@ -14,6 +14,10 @@ class CacheInfo(BaseModel):
     loaded_at: Optional[datetime] = None
     age_seconds: Optional[float] = None
     ttl_seconds: int
+    source: str = Field(
+        default="not loaded",
+        description="Where the served dataset came from: 'live fetch' or a shipped snapshot",
+    )
     refresh: str = "Lazy load on first data request; reloads when older than ttl_seconds"
     endpoint_refresh_param: str = "append ?refresh=true to any data endpoint to force reload"
 
@@ -69,6 +73,32 @@ class AccuracyStats(BaseModel):
     avg_forecast_mw: Optional[float]
     avg_actual_mw: Optional[float]
     status_counts: dict[str, int]
+    # -- indicative £ valuation of the error (day-ahead market-index price) --
+    n_priced_intervals: int = Field(
+        0, description="Matched intervals with a day-ahead price (subset of n_matched)"
+    )
+    price_coverage_pct: float = Field(
+        0.0, description="100 * n_priced_intervals / n_matched; 0 when nothing is priced"
+    )
+    net_error_value_gbp: Optional[float] = Field(
+        None,
+        description=(
+            "Signed value of the forecast error: sum(error x price x hours) over "
+            "priced matched intervals; positive = over-forecast would have cost more. "
+            "Indicative only, null when no priced interval exists."
+        ),
+    )
+    abs_error_value_gbp: Optional[float] = Field(
+        None,
+        description=(
+            "Absolute value of the error: sum(|error| x price x hours) over priced "
+            "matched intervals; the 'cost of being wrong' headline. Indicative only, "
+            "null when no priced interval exists."
+        ),
+    )
+    price_source: Optional[str] = Field(
+        None, description="Price feed behind the £ figures; null when unpriced"
+    )
 
 
 class OverviewResponse(BaseModel):
@@ -95,6 +125,20 @@ class TimeseriesRow(BaseModel):
     status: Literal["matched", "forecast_only", "actual_only", "missing_both"]
     forecast_publish_time: Optional[datetime] = Field(
         None, description="Publication time of the selected decision-time vintage"
+    )
+    price_gbp_per_mwh: Optional[float] = Field(
+        None,
+        description=(
+            "Day-ahead mid price (APXMIDP) for this interval; null when price "
+            "data is unavailable (hourly grain: mean of the clock hour's prices)"
+        ),
+    )
+    error_value_gbp: Optional[float] = Field(
+        None,
+        description=(
+            "Indicative value of error_mw at price x interval hours; null when "
+            "unmatched or unpriced. Not an imbalance settlement figure."
+        ),
     )
 
 
@@ -205,10 +249,94 @@ class DataQualityResponse(BaseModel):
     cache_loaded_at: Optional[datetime]
     cache_age_seconds: Optional[float]
     cache_ttl_seconds: int
+    dataset_source: str = Field(
+        default="live fetch",
+        description="Whether the served rows came from a live fetch or a shipped snapshot",
+    )
     quality_status: str = Field(
         description="'complete' when every expected interval is matched, else 'incomplete'"
     )
     limitations: list[str]
+    note: str
+
+
+# -- Feature G: decision lab (cutoff sensitivity, calibration, skill) --------
+
+
+class CutoffCandidate(BaseModel):
+    cutoff_utc: str = Field(description="Candidate decision cutoff time-of-day on D-1 (HH:MM UTC)")
+    is_current: bool = Field(description="True for the configured decision cutoff in use")
+    mae_mw: Optional[float]
+    rmse_mw: Optional[float]
+    bias_mw: Optional[float]
+    n_matched: int
+    coverage_pct: float
+    delta_mae_mw: Optional[float] = Field(
+        None,
+        description="candidate MAE - current MAE; negative = lower error than the current cutoff",
+    )
+
+
+class CutoffSensitivityResponse(BaseModel):
+    start: date
+    end: date
+    current_cutoff_utc: str
+    candidates: list[CutoffCandidate]
+    best_cutoff_utc: Optional[str] = Field(
+        None, description="Candidate with the lowest MAE (null when no candidate has a sample)"
+    )
+    best_delta_mae_mw: Optional[float] = Field(
+        None, description="best candidate MAE - current MAE (<= 0 means an improvement)"
+    )
+    rule: str = Field(description="Selection rule applied with each candidate cutoff")
+    note: str
+    limitation: Optional[str] = None
+
+
+class CalibrationStats(BaseModel):
+    hours_total: int = Field(description="Delivery hours in the requested range")
+    hours_evaluated: int = Field(
+        description="Hours with an actual and at least one pre-cutoff vintage"
+    )
+    hours_inside: int = Field(description="Actual within the pre-cutoff vintage envelope")
+    hours_below: int = Field(description="Actual below the envelope (forecast too high)")
+    hours_above: int = Field(description="Actual above the envelope (forecast too low)")
+    inside_pct: Optional[float] = Field(None, description="100 * hours_inside / hours_evaluated")
+    avg_envelope_width_mw: Optional[float] = Field(
+        None, description="Mean max-min spread of pre-cutoff vintages (zero with one vintage)"
+    )
+    avg_vintages_per_hour: Optional[float] = Field(
+        None, description="Mean number of pre-cutoff vintages behind each envelope"
+    )
+    limitation: str
+
+
+class SkillStats(BaseModel):
+    grain: Grain = "halfhourly"
+    n_matched: int = Field(description="WINDFOR matched intervals in the range")
+    n_evaluated: int = Field(
+        description="Common sample: matched intervals where persistence (actual 24h earlier) exists"
+    )
+    n_persistence_unavailable: int = Field(
+        description="Matched intervals excluded because the prior day's actual is outside the dataset"
+    )
+    windfor_mae_mw: Optional[float] = Field(None, description="MAE on the common sample")
+    persistence_mae_mw: Optional[float] = Field(
+        None, description="MAE of the persistence baseline on the common sample"
+    )
+    skill_pct: Optional[float] = Field(
+        None,
+        description="100 * (1 - windfor_mae / persistence_mae); positive = forecast beats persistence",
+    )
+    note: str
+
+
+class BenchmarksResponse(BaseModel):
+    start: date
+    end: date
+    current_cutoff_utc: str
+    calibration: CalibrationStats
+    skill: SkillStats
     note: str
 
 

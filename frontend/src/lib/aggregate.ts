@@ -16,10 +16,32 @@ export interface ChartPoint {
 
 const nf = new Intl.NumberFormat("en-GB", { maximumFractionDigits: 0 });
 const nf1 = new Intl.NumberFormat("en-GB", { minimumFractionDigits: 1, maximumFractionDigits: 1 });
+const gbp = new Intl.NumberFormat("en-GB", {
+  style: "currency",
+  currency: "GBP",
+  maximumFractionDigits: 0,
+});
 
 export function formatMw(value: number | null | undefined): string {
   if (value === null || value === undefined) return "—";
   return `${nf.format(value)} MW`;
+}
+
+/** Full pound figure, e.g. "£152,213,719" (null-safe: "—"). */
+export function formatGbp(value: number | null | undefined): string {
+  if (value === null || value === undefined) return "—";
+  return gbp.format(value);
+}
+
+/** Compact pound figure for headlines, e.g. "£152.2m" (null-safe: "—"). */
+export function formatGbpCompact(value: number | null | undefined): string {
+  if (value === null || value === undefined) return "—";
+  const abs = Math.abs(value);
+  const sign = value < 0 ? "-" : "";
+  if (abs >= 1e9) return `${sign}£${(abs / 1e9).toFixed(1)}bn`;
+  if (abs >= 1e6) return `${sign}£${(abs / 1e6).toFixed(1)}m`;
+  if (abs >= 1e3) return `${sign}£${nf.format(Math.round(abs / 1e3))}k`;
+  return gbp.format(value);
 }
 
 export function formatMwSigned(value: number | null | undefined): string {

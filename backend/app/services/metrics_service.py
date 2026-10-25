@@ -8,6 +8,10 @@ Rules:
     the exclusion count is reported (`mape_excluded_intervals`).
   * When there are no matched intervals the metric values are null, never 0.
   * bias = mean(forecast - actual): positive = over-forecast.
+  * £ valuation is indicative: matched intervals priced at the day-ahead
+    market-index price (APXMIDP); unpriced intervals are excluded from the
+    money totals and the price coverage is reported next to them. It is not
+    an imbalance settlement figure.
 """
 from __future__ import annotations
 
@@ -17,6 +21,10 @@ from typing import Sequence
 
 from app.models.records import IntervalPoint, STATUS_MATCHED
 from app.models.schemas import AccuracyStats
+
+PRICE_SOURCE_TEXT = (
+    "Elexon market-index day-ahead mid price (APXMIDP, £/MWh)"
+)
 
 
 def _mean(values: Sequence[float]) -> float | None:
@@ -52,6 +60,29 @@ def _p90_nearest_rank(values: Sequence[float]) -> float | None:
 
 
 P90_MIN_MATCHED = 10
+
+
+def _cost(
+    matched: Sequence[IntervalPoint],
+) -> tuple[int, float | None, float | None]:
+    """Indicative £ value of the error over matched intervals with a price.
+
+    Returns (n_priced, net_value_gbp, absolute_value_gbp); both money values
+    are null when nothing is priced - never 0, which would read as "no error".
+    net = sum(error x price x hours), absolute = sum(|error| x price x hours).
+    """
+    priced = [p for p in matched if p.price_gbp_per_mwh is not None]
+    if not priced:
+        return 0, None, None
+    net = sum(
+        (p.forecast_mw - p.actual_mw) * p.price_gbp_per_mwh * p.duration_hours  # type: ignore[operator]
+        for p in priced
+    )
+    absolute = sum(
+        abs(p.forecast_mw - p.actual_mw) * p.price_gbp_per_mwh * p.duration_hours  # type: ignore[operator]
+        for p in priced
+    )
+    return len(priced), round(net, 2), round(absolute, 2)
 
 
 def compute_stats(points: Sequence[IntervalPoint], expected_count: int, grain: str) -> AccuracyStats:
@@ -95,6 +126,9 @@ def compute_stats(points: Sequence[IntervalPoint], expected_count: int, grain: s
     avg_forecast = _mean([p.forecast_mw for p in matched])
     avg_actual = _mean([p.actual_mw for p in matched])
 
+    n_priced, net_value, abs_value = _cost(matched)
+    price_coverage = (100.0 * n_priced / n_matched) if n_matched else 0.0
+
     return AccuracyStats(
         grain=grain,  # type: ignore[arg-type]
         n_expected=n_expected,
@@ -114,4 +148,9 @@ def compute_stats(points: Sequence[IntervalPoint], expected_count: int, grain: s
         avg_forecast_mw=round(avg_forecast, 3) if avg_forecast is not None else None,
         avg_actual_mw=round(avg_actual, 3) if avg_actual is not None else None,
         status_counts=status_counts,
+        n_priced_intervals=n_priced,
+        price_coverage_pct=round(price_coverage, 2),
+        net_error_value_gbp=net_value,
+        abs_error_value_gbp=abs_value,
+        price_source=PRICE_SOURCE_TEXT if n_priced else None,
     )

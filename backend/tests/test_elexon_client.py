@@ -1,5 +1,5 @@
 """HTTP error, timeout, malformed response and field validation handling."""
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 
 import httpx
 import pytest
@@ -163,3 +163,79 @@ def test_rate_limit_429_is_retried():
     rows = c.fetch_actuals(date(2026, 1, 1), date(2026, 1, 2))
     assert rows == []
     assert calls["n"] == 3
+
+
+# -- market-index prices (£/MWh) ---------------------------------------------
+
+
+def price_row(day: str, sp: int, price):
+    return {
+        "startTime": f"{day}T00:00:00Z",
+        "dataProvider": "APXMIDP",
+        "settlementDate": day,
+        "settlementPeriod": sp,
+        "price": price,
+        "volume": 100.0,
+    }
+
+
+def test_prices_are_chunked_to_the_verified_7_day_limit():
+    seen: list[dict] = []
+
+    def handler(request: httpx.Request):
+        params = dict(request.url.params)
+        seen.append(params)
+        day = params["From"]
+        # boundary row: the next chunk's From date (overlap -> must dedupe)
+        overlap = (date.fromisoformat(day) + timedelta(days=7)).isoformat()
+        return httpx.Response(
+            200,
+            json={
+                "metadata": {"datasets": ["MID"]},
+                "data": [price_row(day, 1, 100.0), price_row(overlap, 1, 100.0)],
+            },
+        )
+
+    rows = client(handler).fetch_prices(date(2026, 1, 1), date(2026, 1, 31))
+    assert len(seen) == 5  # 31 days / 7 days per request
+    for params in seen:
+        span = (date.fromisoformat(params["To"]) - date.fromisoformat(params["From"])).days
+        assert span <= 7
+        assert params["dataProviders"] == "APXMIDP"
+    # unique (date, period) rows, sorted; the overlap is deduped, the
+    # post-period boundary day is dropped
+    keys = [(r.settlement_date, r.settlement_period) for r in rows]
+    assert keys == sorted(keys)
+    assert len(keys) == len(set(keys))
+    assert {d for d, _ in keys} == {date(2026, 1, d) for d in (1, 8, 15, 22, 29)}
+    assert all(r.price_gbp_per_mwh == 100.0 for r in rows)
+
+
+def test_prices_parse_the_dict_envelope_and_null_prices():
+    def handler(request: httpx.Request):
+        return httpx.Response(
+            200,
+            json={
+                "metadata": {"datasets": ["MID"]},
+                "data": [
+                    price_row("2026-01-05", 1, 85.5),
+                    price_row("2026-01-05", 2, None),  # unpriced -> skipped
+                    {**price_row("2026-01-05", 3, 90.0), "dataProvider": "OTHER"},
+                ],
+            },
+        )
+
+    rows = client(handler).fetch_prices(date(2026, 1, 5), date(2026, 1, 5))
+    assert len(rows) == 1  # null price dropped, foreign provider re-checked out
+    row = rows[0]
+    assert row.settlement_period == 1
+    assert row.price_gbp_per_mwh == 85.5
+    assert row.start_time == datetime(2026, 1, 5, 0, 0, tzinfo=UTC)
+
+
+def test_price_payload_without_data_is_a_schema_error():
+    def handler(request: httpx.Request):
+        return httpx.Response(200, json={"metadata": {"datasets": ["MID"]}})
+
+    with pytest.raises(ElexonSchemaError):
+        client(handler).fetch_prices(date(2026, 1, 5), date(2026, 1, 5))

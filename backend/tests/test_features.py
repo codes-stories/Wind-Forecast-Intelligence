@@ -123,7 +123,9 @@ def test_data_quality_reports_served_dataset_provenance(client):
     assert body["selected_forecast_records"] == 31 * 24  # one winner per hour
     assert body["duplicate_records_dropped"] == {"actual": 0, "forecast": 0}
     assert body["decision_cutoff_utc"] == "09:20"
+    assert body["dataset_source"] == "live fetch"  # synthetic rows loaded live
     assert len(body["limitations"]) >= 4
+    assert any("indicative valuation" in item for item in body["limitations"])
     assert "not an external verification" in body["note"]
 
 
@@ -212,6 +214,7 @@ def test_export_csv_matches_timeseries_rows(client):
     assert header == [
         "delivery_timestamp_utc", "forecast_publish_time_utc", "forecast_mw",
         "actual_mw", "signed_error_mw", "absolute_error_mw", "status",
+        "day_ahead_price_gbp_per_mwh", "error_value_gbp",
     ]
     assert len(csv_rows) == len(ts_rows) == 24
 
@@ -225,6 +228,8 @@ def test_export_csv_matches_timeseries_rows(client):
     assert float(first[5]) == 1001.5  # absolute error
     assert first[6] == "matched"
     assert first[4] == str(ts_rows[0]["error_mw"])  # identical value as timeseries
+    # no prices in the synthetic fixture -> £ columns are empty, never 0
+    assert first[7] == "" and first[8] == ""
 
 
 def test_export_csv_missing_values_are_empty_not_zero():

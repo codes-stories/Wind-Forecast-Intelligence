@@ -5,10 +5,16 @@ import os
 from dataclasses import dataclass
 from datetime import date, datetime, time, timedelta, timezone
 from functools import lru_cache
+from pathlib import Path
 
 
 def _env(name: str, default: str) -> str:
     return os.environ.get(name, default)
+
+
+def _parse_bool(raw: str) -> bool:
+    """Truthy env parsing: 1/true/yes/on enable; anything else disables."""
+    return raw.strip().lower() in ("1", "true", "yes", "on")
 
 
 # FUELHH fuel types observed upstream (verified against the live stream).
@@ -46,6 +52,13 @@ FALLBACK_ORIGINS: tuple[str, ...] = (
     "https://wind-forecast-intelligence-rho.vercel.app",
 )
 
+# Cold-start snapshot shipped with the build (backend/data/snapshot.json.gz).
+# Resolved relative to this file so it works from any working directory
+# (repo root, backend/, Vercel's /backend root, the Docker image).
+DEFAULT_SNAPSHOT_PATH = str(
+    Path(__file__).resolve().parents[2] / "data" / "snapshot.json.gz"
+)
+
 
 def normalize_fuel_type(raw: str) -> str:
     """Uppercase and validate a FUELHH fuel type.
@@ -75,6 +88,14 @@ class Settings:
     allowed_origins: tuple[str, ...] = FALLBACK_ORIGINS
     # FUELHH fuel filter: env default, overridable per request via ?fuel_type=
     fuel_type: str = "WIND"
+    # Cold-start snapshot: when enabled and the file exists, the dataset is
+    # served from the shipped snapshot instead of re-fetching from Elexon
+    # (?refresh=true always forces a live fetch).
+    snapshot_enabled: bool = True
+    snapshot_path: str = DEFAULT_SNAPSHOT_PATH
+    # Day-ahead price feed (£ valuation of forecast error). Failure or a
+    # disabled feed degrades to null £ values, never breaks the dataset.
+    prices_enabled: bool = True
 
     @property
     def period_days(self) -> int:
@@ -128,4 +149,7 @@ def get_settings() -> Settings:
         http_retries=int(_env("ELEXON_RETRIES", "3")),
         allowed_origins=allowed,
         fuel_type=normalize_fuel_type(_env("FUEL_TYPE", "WIND")),
+        snapshot_enabled=_parse_bool(_env("SNAPSHOT_ENABLED", "1")),
+        snapshot_path=_env("SNAPSHOT_PATH", DEFAULT_SNAPSHOT_PATH),
+        prices_enabled=_parse_bool(_env("PRICES_ENABLED", "1")),
     )

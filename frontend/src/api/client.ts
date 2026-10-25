@@ -1,6 +1,8 @@
 /** Minimal typed fetch client for the Wind Forecast Intelligence API. */
 import type {
   AccuracyResponse,
+  BenchmarksResponse,
+  CutoffSensitivityResponse,
   DataQualityResponse,
   HealthResponse,
   InsightsResponse,
@@ -84,6 +86,16 @@ export const api = {
   insights: (params: { start: string; end: string; grain: string }, signal?: AbortSignal) =>
     getJson<InsightsResponse>(
       `/api/insights?start=${params.start}&end=${params.end}&grain=${params.grain}`,
+      signal,
+    ),
+  cutoffSensitivity: (params: { start: string; end: string }, signal?: AbortSignal) =>
+    getJson<CutoffSensitivityResponse>(
+      `/api/forecasts/cutoff-sensitivity?start=${params.start}&end=${params.end}`,
+      signal,
+    ),
+  benchmarks: (params: { start: string; end: string }, signal?: AbortSignal) =>
+    getJson<BenchmarksResponse>(
+      `/api/benchmarks?start=${params.start}&end=${params.end}`,
       signal,
     ),
 };

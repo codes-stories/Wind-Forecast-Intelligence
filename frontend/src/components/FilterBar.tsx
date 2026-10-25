@@ -1,3 +1,4 @@
+import { useState } from "react";
 import { exportCsvUrl } from "../api/client";
 
 export type Aggregation = "halfhourly" | "daily";
@@ -23,6 +24,19 @@ export default function FilterBar({
 }: Props) {
   const startInvalid = start > end;
   const exportGrain = aggregation === "daily" ? "hourly" : "halfhourly";
+  const [copied, setCopied] = useState(false);
+
+  const copyViewLink = async () => {
+    try {
+      // the address bar always reflects the current filters/tab (App effect)
+      await navigator.clipboard.writeText(window.location.href);
+      setCopied(true);
+      window.setTimeout(() => setCopied(false), 2000);
+    } catch {
+      setCopied(false); // clipboard unavailable (insecure context, denied)
+    }
+  };
+
   return (
     <section aria-label="Filters" className="card flex flex-wrap items-end gap-4">
       <div className="flex flex-col gap-1">
@@ -86,6 +100,15 @@ export default function FilterBar({
       >
         Export CSV
       </a>
+      <button
+        type="button"
+        className="btn"
+        onClick={copyViewLink}
+        aria-label="Copy view link"
+        title="Copy a URL that reopens this exact view: dates, aggregation and active tab"
+      >
+        {copied ? "Copied" : "Copy view link"}
+      </button>
       <p className="ml-auto max-w-md text-xs text-ink-500">
         {startInvalid ? (
           <span role="alert" className="font-medium text-red-600">
