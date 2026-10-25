@@ -26,6 +26,7 @@ class HealthResponse(BaseModel):
     decision_cutoff_utc: str = Field(
         description="Decision cutoff time-of-day applied to D-1, UTC (HH:MM)"
     )
+    fuel_type: str = Field(description="FUELHH fuel filter in effect (default WIND)")
     cache: CacheInfo
 
 
@@ -180,6 +181,10 @@ class VintageIntervalResponse(BaseModel):
 
 class DataQualityResponse(BaseModel):
     sources: dict[str, str]
+    fuel_type: str = Field(description="FUELHH fuel filter the served dataset was built from")
+    forecast_available: bool = Field(
+        description="False for non-wind fuels: WINDFOR publishes wind only"
+    )
     period_start: date
     period_end: date
     decision_cutoff_utc: str

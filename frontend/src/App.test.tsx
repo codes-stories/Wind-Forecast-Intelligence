@@ -17,6 +17,7 @@ const health: HealthResponse = {
   period_start: "2026-01-01",
   period_end: "2026-01-31",
   decision_cutoff_utc: "09:20",
+  fuel_type: "WIND",
   cache: {
     loaded: true,
     loaded_at: "2026-01-31T12:00:00Z",
@@ -132,6 +133,8 @@ const vintages: VintageIntervalResponse = {
 
 const dataQuality: DataQualityResponse = {
   sources: { actual: "Elexon FUELHH (wind, half-hourly)", forecast: "Elexon WINDFOR (hourly vintage)" },
+  fuel_type: "WIND",
+  forecast_available: true,
   period_start: "2026-01-01",
   period_end: "2026-01-31",
   decision_cutoff_utc: "09:20",

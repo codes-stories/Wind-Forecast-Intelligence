@@ -11,6 +11,45 @@ def _env(name: str, default: str) -> str:
     return os.environ.get(name, default)
 
 
+# FUELHH fuel types observed upstream (verified against the live stream).
+FUEL_TYPES = (
+    "BIOMASS",
+    "CCGT",
+    "COAL",
+    "INTELEC",
+    "INTEW",
+    "INTFR",
+    "INTGRNL",
+    "INTIFA2",
+    "INTIRL",
+    "INTNED",
+    "INTNEM",
+    "INTNSL",
+    "INTVKL",
+    "NPSHYD",
+    "NUCLEAR",
+    "OCGT",
+    "OIL",
+    "OTHER",
+    "PS",
+    "WIND",
+)
+
+
+def normalize_fuel_type(raw: str) -> str:
+    """Uppercase and validate a FUELHH fuel type.
+
+    Upstream returns HTTP 200 with an empty array for an unknown fuelType,
+    which would silently serve an empty dataset, so the value is rejected here.
+    """
+    fuel = (raw or "").strip().upper()
+    if fuel not in FUEL_TYPES:
+        raise ValueError(
+            f"unknown fuel type {raw!r}; expected one of {', '.join(FUEL_TYPES)}"
+        )
+    return fuel
+
+
 @dataclass(frozen=True)
 class Settings:
     base_url: str
@@ -26,6 +65,8 @@ class Settings:
         "http://localhost:5173",
         "http://127.0.0.1:5173",
     )
+    # FUELHH fuel filter: env default, overridable per request via ?fuel_type=
+    fuel_type: str = "WIND"
 
     @property
     def period_days(self) -> int:
@@ -80,4 +121,5 @@ def get_settings() -> Settings:
                 "http://localhost:5173,http://127.0.0.1:5173",
             )
         ),
+        fuel_type=normalize_fuel_type(_env("FUEL_TYPE", "WIND")),
     )

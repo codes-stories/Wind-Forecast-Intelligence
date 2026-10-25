@@ -30,7 +30,7 @@ until deployment happens.
 ## Submission checklist
 
 - [ ] **Application deployed and tested.** — ❌ **Blocked.** Local + Docker stacks are built
-      and fully tested (71 backend tests, 40+1 frontend tests, Phase-4 audit, Features A–F
+      and fully tested (88 backend tests, 40+1 frontend tests, Phase-4 audit, Features A–F
       + dark/light mode enhancement re-verified end-to-end). Public deployment awaits two tokens: Vercel token +
       Render API key (user chose “Provide API
       tokens” in Phase 5; none were supplied). Deploy commands: README §17 and `render.yaml`.

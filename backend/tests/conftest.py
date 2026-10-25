@@ -53,13 +53,19 @@ class FakeClient:
         self.actuals = list(actuals)
         self.forecasts = list(forecasts)
         self.error = error
+        self.requested_fuel_types: list[str] = []
+        self.forecast_calls = 0
 
-    def fetch_actuals(self, start: date, end: date) -> list[ActualRow]:
+    def fetch_actuals(
+        self, start: date, end: date, fuel_type: str | None = None
+    ) -> list[ActualRow]:
         if self.error is not None:
             raise self.error
+        self.requested_fuel_types.append(fuel_type or "WIND")
         return [r for r in self.actuals if start <= r.settlement_date <= end]
 
     def fetch_forecasts(self, publish_from: datetime, publish_to: datetime) -> list[ForecastRow]:
+        self.forecast_calls += 1
         if self.error is not None:
             raise self.error
         return [r for r in self.forecasts if publish_from <= r.publish_time <= publish_to]
@@ -88,9 +94,11 @@ def synth_period(
     return actuals, forecasts
 
 
-def loaded_store(actuals=(), forecasts=(), settings: Settings | None = None) -> DataStore:
+def loaded_store(
+    actuals=(), forecasts=(), settings: Settings | None = None, fuel_type: str | None = None
+) -> DataStore:
     settings = settings or make_settings()
-    store = DataStore(FakeClient(actuals, forecasts), settings)
+    store = DataStore(FakeClient(actuals, forecasts), settings, fuel_type)
     store.load()
     return store
 

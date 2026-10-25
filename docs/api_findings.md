@@ -91,6 +91,15 @@ cannot be combined —
 Also verified: `publishDateTimeFrom > publishDateTimeTo` → HTTP 400 with a
 validation message. Date format for settlement dates must be `yyyy-MM-dd`.
 
+**`fuelType` behaviour (verified live):** the value is case-insensitive
+(`fuelType=nuclear` == `fuelType=NUCLEAR`), a single value is accepted, and an
+**unknown** fuel returns HTTP 200 with `[]` rather than an error — so the app
+validates the value against the observed set
+(`BIOMASS, CCGT, COAL, INTELEC, INTEW, INTFR, INTGRNL, INTIFA2, INTIRL,
+INTNED, INTNEM, INTNSL, INTVKL, NPSHYD, NUCLEAR, OCGT, OIL, OTHER, PS, WIND`,
+January 2026 sample) before making the request. No `SOLAR`/`HYDRO` rows exist
+in this feed. Only `WIND` has a `WINDFOR` counterpart.
+
 ### WINDFOR (forecasts)
 
 | Parameter | Type | Semantics |

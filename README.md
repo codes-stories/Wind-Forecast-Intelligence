@@ -4,23 +4,45 @@ Retrospective **day-ahead UK wind forecast vs outturn** analysis for **January 2
 Elexon BMRS data. The dashboard answers one question for every half-hour of the month:
 *how far off was the day-ahead wind forecast, when was it made, and how reliable was it?*
 
+> **New here?** Run it and click through it with [`USAGE.md`](USAGE.md) (how to use the app,
+> how to read the metrics, troubleshooting). Reviewing the demo?
+> [`docs/video-recording-guide.md`](docs/video-recording-guide.md) has the two-part video
+> storyboard plus the code-level knowledge transfer.
+
 ---
 
 ## 1. Problem statement and intended users
 
-**Problem.** System operators, traders and analysts need to know how trustworthy day-ahead wind
-forecasts were *at the moment the decision was made* — not with hindsight. Forecast vendors and
-published metrics rarely expose which vintage was actually available before the market gate, and
-outturn comparisons are usually averaged into opacity.
+**Client context.** A UK energy utility buys electricity on the **day-ahead market** to serve its
+consumers. To know how much power it must *additionally* procure (e.g. from thermal plants) beyond
+the generation available from renewables, it has to trust a **wind generation forecast that is
+published one day before delivery** — the decision is made *before* the outturn exists.
+
+**Problem.** Nobody can buy on trust. Two questions have to be answerable with numbers:
+
+1. **Which forecast was actually available at the decision moment?** Vendors and dashboards show
+   *the* forecast, not *the forecast as of the gate* — post-cutoff revisions quietly leak in.
+2. **How wrong was that forecast, quantitatively?** Average-error headlines hide the interval-level
+   error, the direction of the error (over- vs under-forecast) and the data actually covered.
+
+This product answers both, for every half-hour of the delivery period, from public Elexon BMRS data
+only (`FUELHH` actual vs `WINDFOR` forecast, national GB level).
 
 **Intended users.**
 
+- Day-ahead procurement / trading teams quantifying forecast risk before the market gate
 - Energy-market analysts evaluating day-ahead wind forecast quality (GB)
-- Trading / scheduling teams reviewing historical bias before a delivery period
 - Data/ML practitioners wanting a clean, auditable forecast-vs-actual baseline on real grid data
 - Reviewers assessing a complete, testable full-stack data application
 
 ## 2. Key features
+
+**Mapped to the two stated requirements:**
+
+| # | Requirement | Where it is answered |
+|---|---|---|
+| 1 | Understand the **latest forecast available at the decision moment** | Point-in-time selection at the D−1 cutoff, `/api/forecasts/latest`, **Forecast Explorer** tab (every vintage for one interval, eligible vs post-cutoff), “Forecast published (UTC)” column in the data table |
+| 2 | **Evaluate forecast accuracy quantitatively** | **Overview** KPIs (MAE, RMSE, bias, MAPE, coverage, avg forecast/actual), `/api/accuracy`, **Error Analysis** tab (heatmap, median/p90, error distribution), **Evidence insights**, CSV export |
 
 - **Point-in-time forecast selection** — for each delivery interval the latest WINDFOR vintage
   published **at or before 09:20 UTC on D-1** (EPEX SPOT GB day-ahead order-book closure) is used;
@@ -127,7 +149,8 @@ Two deployment modes:
 
 ```
 .
-├── README.md                  # this file
+├── README.md                  # this file (product, architecture, setup)
+├── USAGE.md                   # how to run and USE the app, metric definitions, troubleshooting
 ├── .env.example               # placeholder environment variables (no secrets)
 ├── .gitignore
 ├── docker-compose.yml         # local two-container stack (backend + nginx frontend)
@@ -147,7 +170,7 @@ Two deployment modes:
 │   │       ├── forecast_service.py   # dedupe, cutoff selection, alignment, cache, vintages
 │   │       ├── metrics_service.py    # MAE/RMSE/bias/MAPE + median/p90, matched only
 │   │       └── insights_service.py   # deterministic evidence-based insights
-│   └── tests/                 # 71 tests: contracts, metrics, selection, CORS, features, …
+│   └── tests/                 # 88 tests: contracts, metrics, selection, CORS, features, fuel filter, …
 ├── frontend/
 │   ├── Dockerfile             # multi-stage: node build → nginx serve + proxy
 │   ├── nginx.conf.template    # /api + /health proxy, SPA fallback ($BACKEND_URL)
@@ -168,7 +191,10 @@ Two deployment modes:
 ├── data/samples/              # small verified API samples + provenance manifest
 ├── docs/
 │   ├── api_findings.md        # verified Elexon contract, cutoff sources, risks
-│   └── screenshots/          # dashboard-full.png (light) + dashboard-dark.png
+│   ├── video-recording-guide.md # 2-part video storyboard + code-level knowledge transfer
+│   ├── video-script.md         # minute-by-minute narration script and timing
+│   ├── submission-checklist.md # status of every submission item with evidence
+│   └── screenshots/           # dashboard-full.png (light) + dashboard-dark.png
 ```
 
 ## 7. Data sources and Elexon fields
@@ -178,12 +204,19 @@ Base URL: `https://data.elexon.co.uk/bmrs/api/v1` (no API key; verified in
 
 | Dataset | Role | Fields used | Cadence |
 |---|---|---|---|
-| **FUELHH** | Actual outturn (`fuelType=WIND`) | `settlementDate`, `settlementPeriod` (1–48), `publishTime`, `generation` (MW) | half-hourly, 48/day |
+| **FUELHH** | Actual outturn (`fuelType`, default `WIND`) | `settlementDate`, `settlementPeriod` (1–48), `publishTime`, `generation` (MW) | half-hourly, 48/day |
 | **WINDFOR** | Day-ahead forecast | `publishTime`, `startTime`, `generation` (MW) | hourly; **8 vintages/day** (02:30, 04:30, 07:30, 09:30, 11:30, 15:30, 18:30, 22:30 UTC) |
 
 Filters used: FUELHH `settlementDateFrom/To` **XOR** `publishDateTimeFrom/To` (mixing → HTTP 400);
 WINDFOR publish-time window only (no delivery-date filter). Sample records and provenance:
 [`data/samples/`](data/samples/).
+
+**Fuel filter:** every data endpoint accepts `?fuel_type=` (`WIND`, `NUCLEAR`, `CCGT`, `COAL`,
+`OIL`, `PS`, `NPSHYD`, `BIOMASS`, `OCGT`, `OTHER` or the `INT*` interconnectors) and defaults to
+the `FUEL_TYPE` env var. Unknown values are rejected with HTTP 400 — upstream answers an unknown
+`fuelType` with HTTP 200 and an empty array, which would silently serve an empty dataset. Only
+`WIND` has a `WINDFOR` forecast: for any other fuel the dataset is actuals-only and every interval
+is reported `actual_only`.
 
 ## 8. Forecast vintage selection and historical decision cutoff
 
@@ -294,6 +327,7 @@ Copy `.env.example` → `.env` (never commit `.env`). **No API secrets exist** �
 | `ELEXON_BASE_URL` | `https://data.elexon.co.uk/bmrs/api/v1` | Upstream API root |
 | `PERIOD_START` / `PERIOD_END` | `2026-01-01` / `2026-01-31` | Reporting period (delivery dates) |
 | `DECISION_CUTOFF_HHMM` | `09:20` | Historical decision cutoff on D−1, UTC |
+| `FUEL_TYPE` | `WIND` | FUELHH fuel filter; overridable per request with `?fuel_type=` |
 | `CACHE_TTL_SECONDS` | `3600` | In-memory dataset TTL |
 | `ELEXON_TIMEOUT_SECONDS` / `ELEXON_RETRIES` | `60` / `3` | Upstream HTTP behaviour |
 | `ALLOWED_ORIGINS` | `http://localhost:5173,…` | Comma-separated CORS origins (add your Vercel URL) |
@@ -326,6 +360,8 @@ curl "http://127.0.0.1:8000/api/forecasts/vintages?date=2026-01-15&period=25"
 curl "http://127.0.0.1:8000/api/data-quality"
 curl "http://127.0.0.1:8000/api/insights?start=2026-01-01&end=2026-01-31"
 curl -OJ "http://127.0.0.1:8000/api/export.csv?start=2026-01-01&end=2026-01-31&grain=halfhourly"
+# fuel filter (all data endpoints): only WIND has a WINDFOR forecast to compare
+curl "http://127.0.0.1:8000/api/timeseries?start=2026-01-15&end=2026-01-15&fuel_type=NUCLEAR"
 # force a dataset reload: append &refresh=true to any data endpoint
 ```
 
@@ -335,11 +371,11 @@ calibrated confidence bound.
 ## 16. Tests
 
 ```bash
-# Backend — 71 tests (contracts, metrics incl. median/p90, selection rule, alignment,
+# Backend — 88 tests (contracts, metrics incl. median/p90, selection rule, alignment,
 # vintage explorer, data quality, insights, CSV export, CORS, errors)
 cd backend && ../.venv/bin/python -m pytest
 
-# Frontend — 34 tests (loading/error states, KPI rendering, filters, aggregation, tab
+# Frontend — 40 tests (loading/error states, KPI rendering, filters, aggregation, tab
 # navigation, explorer/heatmap/quality/insights rendering, heatmap prep, pure funcs)
 cd frontend && npm test
 
@@ -350,7 +386,7 @@ cd frontend && LIVE=1 VITE_API_BASE=http://127.0.0.1:8000 npm test
 python3 scripts/verify_api.py
 ```
 
-Latest run: backend **71 passed**, frontend **40 passed + 1 gated**, live mode **41 passed**,
+Latest run: backend **88 passed**, frontend **40 passed + 1 gated**, live mode **41 passed**,
 `tsc --noEmit` and `npm run build` clean.
 
 ## 17. Deployment status and URLs

@@ -9,7 +9,7 @@ from typing import Optional, Literal
 from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import StreamingResponse
 
-from app.core.config import Settings, get_settings
+from app.core.config import Settings, get_settings, normalize_fuel_type
 from app.models.schemas import (
     AccuracyResponse,
     CacheInfo,
@@ -46,12 +46,30 @@ DATA_QUALITY_LIMITATIONS = [
 ]
 
 
+def _fuel_type(fuel_type: Optional[str], settings: Settings) -> str:
+    """Resolve ?fuel_type= against the configured default, rejecting unknown fuels."""
+    try:
+        return normalize_fuel_type(fuel_type or settings.fuel_type)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
 def get_store_dep(
     refresh: bool = Query(
         False, description="Force a reload of the cached January 2026 dataset"
     ),
+    fuel_type: Optional[str] = Query(
+        None,
+        description=(
+            "FUELHH fuel filter (e.g. WIND, NUCLEAR, CCGT); defaults to the "
+            "configured FUEL_TYPE. Only WIND has a WINDFOR forecast to compare."
+        ),
+    ),
 ) -> DataStore:
-    return forecast_service.get_store(get_settings(), refresh=refresh)
+    settings = get_settings()
+    return forecast_service.get_store(
+        settings, refresh=refresh, fuel_type=_fuel_type(fuel_type, settings)
+    )
 
 
 def _validate_range(start: Optional[date], end: Optional[date], settings: Settings) -> tuple[date, date]:
@@ -99,14 +117,19 @@ def _timeseries_rows(store: DataStore, start: date, end: date, grain: GrainParam
 
 
 @router.get("/health", response_model=HealthResponse, tags=["ops"])
-def health(settings: Settings = Depends(get_settings)) -> HealthResponse:
+def health(
+    fuel_type: Optional[str] = Query(None, description="Fuel filter to report cache state for"),
+    settings: Settings = Depends(get_settings),
+) -> HealthResponse:
     """Liveness + explicit cache state. Never calls the upstream API."""
+    fuel = _fuel_type(fuel_type, settings)
     return HealthResponse(
         status="ok",
         period_start=settings.period_start,
         period_end=settings.period_end,
         decision_cutoff_utc=settings.decision_cutoff_label,
-        cache=CacheInfo(**forecast_service.cache_status(settings)),
+        fuel_type=fuel,
+        cache=CacheInfo(**forecast_service.cache_status(settings, fuel)),
     )
 
 
@@ -314,9 +337,24 @@ def data_quality(
     missing_forecast = sum(1 for p in half if p.status in ("actual_only", "missing_both"))
     expected = len(half)
     coverage = (100.0 * matched / expected) if expected else 0.0
-    cache = forecast_service.cache_status(settings)
+    cache = forecast_service.cache_status(settings, store.fuel_type)
+    limitations = list(DATA_QUALITY_LIMITATIONS)
+    if not store.forecast_available:
+        limitations.append(
+            "WINDFOR publishes wind only, so this fuel has actuals but no forecast "
+            "to compare; every interval is reported as actual_only."
+        )
     return DataQualityResponse(
-        sources={"actual": "Elexon FUELHH (wind, half-hourly)", "forecast": "Elexon WINDFOR (hourly vintage)"},
+        sources={
+            "actual": f"Elexon FUELHH ({store.fuel_type.lower()}, half-hourly)",
+            "forecast": (
+                "Elexon WINDFOR (hourly vintage)"
+                if store.forecast_available
+                else "unavailable for this fuel (WINDFOR is wind-only)"
+            ),
+        },
+        fuel_type=store.fuel_type,
+        forecast_available=store.forecast_available,
         period_start=settings.period_start,
         period_end=settings.period_end,
         decision_cutoff_utc=settings.decision_cutoff_label,
@@ -345,7 +383,7 @@ def data_quality(
         cache_age_seconds=cache.get("age_seconds"),
         cache_ttl_seconds=int(cache.get("ttl_seconds", settings.cache_ttl_seconds)),
         quality_status="complete" if matched == expected and expected > 0 else "incomplete",
-        limitations=DATA_QUALITY_LIMITATIONS,
+        limitations=limitations,
         note=(
             "Counts are computed from the dataset currently served by this API. "
             "'complete' means every expected interval is matched; it is not an "

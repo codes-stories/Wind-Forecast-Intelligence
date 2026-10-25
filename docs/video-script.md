@@ -5,6 +5,10 @@
 
 > Status: **SCRIPT ONLY — not yet recorded.** Follow the run sheet, record each part,
 > check durations in YouTube Studio (must be ≤ 10:00 combined), upload as **Unlisted**.
+>
+> Recording from scratch? Use [`video-recording-guide.md`](video-recording-guide.md) instead —
+> it carries this storyboard **plus** the code snippets, file paths and line numbers you need
+> for the Part 2 knowledge transfer.
 
 ---
 
@@ -121,7 +125,7 @@
   `metrics_service` (statistics) → `insights_service` (deterministic findings — no LLM);
   schemas are the single source of truth mirrored in `types.ts`; heatmap prep lives in
   `frontend/src/lib/heatmap.ts` (unit-tested, no metric recalculation client-side).
-- Tests on screen: `71 passed` (pytest) · `40 passed` (vitest) · optional
+- Tests on screen: `88 passed` (pytest) · `40 passed` (vitest) · optional
   `LIVE=1 … npm test` → **41st integration test against the real backend**.
 - Error handling: validation → 400/422 with machine-readable `detail`; upstream failure → 502
   with the real Elexon error; frontend shows a retryable error panel; missing data renders as

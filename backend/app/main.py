@@ -19,7 +19,8 @@ app = FastAPI(
     version="1.0.0",
     description=(
         "Retrospective day-ahead wind forecast vs outturn analysis for January 2026. "
-        "Data: Elexon BMRS FUELHH (actual, fuelType=WIND) and WINDFOR (forecast vintages). "
+        "Data: Elexon BMRS FUELHH (actual, fuelType filter, default WIND) and "
+        "WINDFOR (forecast vintages, wind only). "
         "Forecasts are selected point-in-time using a decision cutoff on D-1; "
         "post-cutoff publications are never used. See docs/api_findings.md for the "
         "verified data contract and assumptions."

@@ -8,7 +8,9 @@ Verified notes enforced here:
   * No pagination exists - one response carries every row (18k rows observed).
   * FUELHH rejects mixing settlement and publish date filters (HTTP 400).
   * Timestamps are ISO-8601 UTC with a trailing 'Z'.
-  * fuelType=WIND server-side filter is applied and re-checked client-side.
+  * fuelType server-side filter is applied and re-checked client-side; an
+    unknown fuelType returns HTTP 200 with [] upstream, so values are
+    validated before the request (see app.core.config.normalize_fuel_type).
 """
 from __future__ import annotations
 
@@ -18,7 +20,7 @@ from datetime import date, datetime, timezone
 
 import httpx
 
-from app.core.config import Settings
+from app.core.config import Settings, normalize_fuel_type
 from app.models.records import ActualRow, ForecastRow
 
 logger = logging.getLogger(__name__)
@@ -118,21 +120,26 @@ class ElexonClient:
         raise last_error
 
     # -- FUELHH ------------------------------------------------------------
-    def fetch_actuals(self, start: date, end: date) -> list[ActualRow]:
-        """Half-hourly WIND outturn for the inclusive settlement-date range."""
+    def fetch_actuals(
+        self, start: date, end: date, fuel_type: str | None = None
+    ) -> list[ActualRow]:
+        """Half-hourly outturn for the inclusive settlement-date range.
+
+        fuel_type defaults to the configured FUEL_TYPE (WIND unless overridden).
+        """
+        fuel = normalize_fuel_type(fuel_type or self.settings.fuel_type)
         payload = self._get(
             "/datasets/FUELHH/stream",
             {
                 "settlementDateFrom": start.isoformat(),
                 "settlementDateTo": end.isoformat(),
-                "fuelType": "WIND",
+                "fuelType": fuel,
             },
         )
         items = self._rows(payload, "FUELHH")
         rows: list[ActualRow] = []
         for item in items:
-            fuel = item.get("fuelType")
-            if fuel != "WIND":  # server-side filter, verified again client-side
+            if item.get("fuelType") != fuel:  # server-side filter, re-checked here
                 continue
             settlement_date = _require(item, "settlementDate")
             period = _require(item, "settlementPeriod")

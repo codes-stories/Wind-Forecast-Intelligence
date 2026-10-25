@@ -8,6 +8,7 @@ export interface HealthResponse {
   period_start: string;
   period_end: string;
   decision_cutoff_utc: string;
+  fuel_type: string;
   cache: {
     loaded: boolean;
     loaded_at: string | null;
@@ -104,6 +105,8 @@ export interface VintageIntervalResponse {
 
 export interface DataQualityResponse {
   sources: { actual: string; forecast: string };
+  fuel_type: string;
+  forecast_available: boolean;
   period_start: string;
   period_end: string;
   decision_cutoff_utc: string;

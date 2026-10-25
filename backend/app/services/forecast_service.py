@@ -14,7 +14,7 @@ import threading
 from datetime import date, datetime, time, timedelta, timezone
 from typing import Protocol, Sequence
 
-from app.core.config import Settings
+from app.core.config import Settings, normalize_fuel_type
 from app.models.records import (
     ActualRow,
     ForecastRow,
@@ -38,9 +38,15 @@ GRAIN_NOTE = (
 
 
 class ElexonFetchClient(Protocol):
-    def fetch_actuals(self, start: date, end: date) -> list[ActualRow]: ...
+    def fetch_actuals(
+        self, start: date, end: date, fuel_type: str | None = None
+    ) -> list[ActualRow]: ...
 
     def fetch_forecasts(self, publish_from: datetime, publish_to: datetime) -> list[ForecastRow]: ...
+
+
+# WINDFOR publishes wind only: any other FUELHH fuel has actuals but no forecast.
+FORECAST_FUEL = "WIND"
 
 
 def decision_cutoff_for(interval_start: datetime, cutoff: time) -> datetime:
@@ -220,9 +226,12 @@ def vintages_for_interval(
 class DataStore:
     """Loads the study period once and serves aligned, auditable series."""
 
-    def __init__(self, client: ElexonFetchClient, settings: Settings):
+    def __init__(
+        self, client: ElexonFetchClient, settings: Settings, fuel_type: str | None = None
+    ):
         self.client = client
         self.settings = settings
+        self.fuel_type = normalize_fuel_type(fuel_type or settings.fuel_type)
         self.loaded_at: datetime | None = None
         self.stats: dict = {}
         self.hourly: list[IntervalPoint] = []
@@ -230,6 +239,11 @@ class DataStore:
         self.selected: dict[datetime, ForecastRow] = {}
         self.forecast_rows: list[ForecastRow] = []
         self.actual_rows: list[ActualRow] = []
+
+    @property
+    def forecast_available(self) -> bool:
+        """WINDFOR carries wind only, so other fuels have actuals but no forecast."""
+        return self.fuel_type == FORECAST_FUEL
 
     @property
     def is_loaded(self) -> bool:
@@ -242,10 +256,22 @@ class DataStore:
 
     def load(self) -> None:
         s = self.settings
-        actuals_raw = self.client.fetch_actuals(s.period_start, s.period_end)
-        forecasts_raw = self.client.fetch_forecasts(s.forecast_publish_from, s.forecast_publish_to)
+        actuals_raw = self.client.fetch_actuals(s.period_start, s.period_end, self.fuel_type)
+        if self.forecast_available:
+            forecasts_raw = self.client.fetch_forecasts(
+                s.forecast_publish_from, s.forecast_publish_to
+            )
+        else:
+            forecasts_raw = []
+            logger.info(
+                "fuelType=%s has no WINDFOR counterpart; forecast comparison disabled",
+                self.fuel_type,
+            )
         logger.info(
-            "fetched %s FUELHH rows and %s WINDFOR rows", len(actuals_raw), len(forecasts_raw)
+            "fetched %s FUELHH rows (fuelType=%s) and %s WINDFOR rows",
+            len(actuals_raw),
+            self.fuel_type,
+            len(forecasts_raw),
         )
 
         actuals, actual_dupes = dedupe_actuals(actuals_raw)
@@ -263,6 +289,8 @@ class DataStore:
             s.period_start, s.period_end, actual_by_start, selected
         )
         self.stats = {
+            "fuel_type": self.fuel_type,
+            "forecast_available": self.forecast_available,
             "actual_rows_fetched": len(actuals_raw),
             "forecast_rows_fetched": len(forecasts_raw),
             "actual_duplicates_dropped": actual_dupes,
@@ -282,48 +310,53 @@ class DataStore:
 
 
 # -- process-wide cache ------------------------------------------------------
-_store: DataStore | None = None
+# One store per fuel type: FUELHH rows differ by fuel and WINDFOR only exists
+# for wind, so the datasets can never be mixed inside a single store.
+_stores: dict[str, DataStore] = {}
 _lock = threading.Lock()
 
 
-def build_store(settings: Settings) -> DataStore:
-    return DataStore(ElexonClient(settings), settings)
+def build_store(settings: Settings, fuel_type: str | None = None) -> DataStore:
+    return DataStore(ElexonClient(settings), settings, fuel_type)
 
 
-def get_store(settings: Settings, refresh: bool = False) -> DataStore:
-    """Return the cached store, loading it when absent, stale, or refresh=True.
+def get_store(
+    settings: Settings, refresh: bool = False, fuel_type: str | None = None
+) -> DataStore:
+    """Return the cached store for a fuel type, loading it when absent, stale or refresh=True.
 
-    Cache policy: in-process, single row-set for the whole study period,
-    TTL = settings.cache_ttl_seconds, forced reload via ?refresh=true.
+    Cache policy: in-process, one row-set per fuel type for the whole study
+    period, TTL = settings.cache_ttl_seconds, forced reload via ?refresh=true.
     No database: the dataset is ~1488 actual + ~18.7k forecast rows.
     """
-    global _store
+    fuel = normalize_fuel_type(fuel_type or settings.fuel_type)
     with _lock:
-        stale = _store is None or not _store.is_loaded
-        if not stale and _store is not None:
-            age = _store.age_seconds() or 0
-            stale = age > settings.cache_ttl_seconds
+        store = _stores.get(fuel)
+        stale = store is None or not store.is_loaded
+        if not stale and store is not None:
+            stale = (store.age_seconds() or 0) > settings.cache_ttl_seconds
         if refresh or stale:
-            store = build_store(settings)
+            store = build_store(settings, fuel)
             store.load()  # ElexonError propagates -> 502 handler
-            _store = store
-        return _store
+            _stores[fuel] = store
+        return store
 
 
-def cache_status(settings: Settings) -> dict:
+def cache_status(settings: Settings, fuel_type: str | None = None) -> dict:
+    fuel = normalize_fuel_type(fuel_type or settings.fuel_type)
     with _lock:
-        if _store is None or not _store.is_loaded:
+        store = _stores.get(fuel)
+        if store is None or not store.is_loaded:
             return {"loaded": False, "ttl_seconds": settings.cache_ttl_seconds}
         return {
             "loaded": True,
-            "loaded_at": _store.loaded_at,
-            "age_seconds": round(_store.age_seconds() or 0, 1),
+            "loaded_at": store.loaded_at,
+            "age_seconds": round(store.age_seconds() or 0, 1),
             "ttl_seconds": settings.cache_ttl_seconds,
         }
 
 
 def reset_cache() -> None:
     """Test hook."""
-    global _store
     with _lock:
-        _store = None
+        _stores.clear()
