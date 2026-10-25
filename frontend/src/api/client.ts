@@ -18,7 +18,15 @@ export class ApiError extends Error {
   }
 }
 
-const BASE: string = import.meta.env.VITE_API_BASE ?? "";
+/**
+ * API base URL. `VITE_API_BASE` wins when set at build time; production builds
+ * without it fall back to the deployed backend (so Vercel needs no env var).
+ * Dev/test keep "" so the Vite dev proxy (/api, /health) is used.
+ */
+const DEPLOYED_BACKEND = "https://wind-forecast-intelligence-yalb.vercel.app";
+
+const BASE: string =
+  import.meta.env.VITE_API_BASE ?? (import.meta.env.PROD ? DEPLOYED_BACKEND : "");
 
 async function errorDetail(response: Response): Promise<string> {
   try {

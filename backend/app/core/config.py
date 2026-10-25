@@ -59,11 +59,13 @@ class Settings:
     cache_ttl_seconds: int
     http_timeout_seconds: float
     http_retries: int
-    # Origins allowed by CORS: the Vite dev server by default; override with
+    # Origins allowed by CORS: the Vite dev server plus the deployed Vercel
+    # frontend (hardcoded fallback, so no env var is needed); override with
     # ALLOWED_ORIGINS (comma-separated) when the frontend is served elsewhere.
     allowed_origins: tuple[str, ...] = (
         "http://localhost:5173",
         "http://127.0.0.1:5173",
+        "https://wind-forecast-intelligence-rho.vercel.app",
     )
     # FUELHH fuel filter: env default, overridable per request via ?fuel_type=
     fuel_type: str = "WIND"
@@ -118,7 +120,8 @@ def get_settings() -> Settings:
         allowed_origins=_parse_origins(
             _env(
                 "ALLOWED_ORIGINS",
-                "http://localhost:5173,http://127.0.0.1:5173",
+                "http://localhost:5173,http://127.0.0.1:5173,"
+                "https://wind-forecast-intelligence-rho.vercel.app",
             )
         ),
         fuel_type=normalize_fuel_type(_env("FUEL_TYPE", "WIND")),
