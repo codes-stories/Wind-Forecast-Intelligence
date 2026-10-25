@@ -22,9 +22,10 @@ services:
     build:
       context: ./frontend
       args:
-        # "" = same-origin; the nginx proxy in this container reaches the
-        # backend at $BACKEND_URL below. Override for non-proxy deploys.
-        VITE_API_BASE: ""
+        # "same-origin" = requests stay on this origin and the nginx proxy in
+        # this container reaches the backend at $BACKEND_URL below. Override
+        # with a URL for non-proxy deploys.
+        VITE_API_BASE: "same-origin"
     image: wind-forecast-frontend:local
     ports:
       - "8081:80"

@@ -19,14 +19,25 @@ export class ApiError extends Error {
 }
 
 /**
- * API base URL. `VITE_API_BASE` wins when set at build time; production builds
- * without it fall back to the deployed backend (so Vercel needs no env var).
- * Dev/test keep "" so the Vite dev proxy (/api, /health) is used.
+ * API base URL. Vercel dashboards sometimes store `VITE_API_BASE` as an empty
+ * string, which silently defeats `??`/`||`-style fallbacks and sends every
+ * request to the static host (404). Resolution is therefore explicit:
+ *   "same-origin" -> ""  (Docker: nginx proxies /api and /health)
+ *   non-empty     -> that URL (explicit override)
+ *   "" / unset    -> production build: deployed backend; dev/test: Vite proxy
  */
 const DEPLOYED_BACKEND = "https://wind-forecast-intelligence-yalb.vercel.app";
 
+const configured: string | undefined = import.meta.env.VITE_API_BASE;
+
 const BASE: string =
-  import.meta.env.VITE_API_BASE ?? (import.meta.env.PROD ? DEPLOYED_BACKEND : "");
+  configured === "same-origin"
+    ? ""
+    : configured
+      ? configured
+      : import.meta.env.PROD
+        ? DEPLOYED_BACKEND
+        : "";
 
 async function errorDetail(response: Response): Promise<string> {
   try {

@@ -36,6 +36,17 @@ FUEL_TYPES = (
 )
 
 
+# Always allowed by CORS regardless of ALLOWED_ORIGINS: the Vite dev server
+# and the deployed Vercel frontend. The env var EXTENDS this list (it never
+# replaces it), so a stale or empty value in the deploy dashboard cannot
+# break the live app.
+FALLBACK_ORIGINS: tuple[str, ...] = (
+    "http://localhost:5173",
+    "http://127.0.0.1:5173",
+    "https://wind-forecast-intelligence-rho.vercel.app",
+)
+
+
 def normalize_fuel_type(raw: str) -> str:
     """Uppercase and validate a FUELHH fuel type.
 
@@ -59,14 +70,9 @@ class Settings:
     cache_ttl_seconds: int
     http_timeout_seconds: float
     http_retries: int
-    # Origins allowed by CORS: the Vite dev server plus the deployed Vercel
-    # frontend (hardcoded fallback, so no env var is needed); override with
-    # ALLOWED_ORIGINS (comma-separated) when the frontend is served elsewhere.
-    allowed_origins: tuple[str, ...] = (
-        "http://localhost:5173",
-        "http://127.0.0.1:5173",
-        "https://wind-forecast-intelligence-rho.vercel.app",
-    )
+    # Origins always allowed by CORS (see FALLBACK_ORIGINS); the
+    # ALLOWED_ORIGINS env var extends this list, it never replaces it.
+    allowed_origins: tuple[str, ...] = FALLBACK_ORIGINS
     # FUELHH fuel filter: env default, overridable per request via ?fuel_type=
     fuel_type: str = "WIND"
 
@@ -102,13 +108,16 @@ def _parse_cutoff(raw: str) -> time:
 
 def _parse_origins(raw: str) -> tuple[str, ...]:
     origins = tuple(o.strip() for o in raw.split(",") if o.strip())
-    if not origins:
-        raise ValueError("ALLOWED_ORIGINS must list at least one origin")
+    # An empty/whitespace env value is treated as "not set" rather than an
+    # error, so a blank ALLOWED_ORIGINS cannot lock every origin out.
     return origins
 
 
 @lru_cache(maxsize=1)
 def get_settings() -> Settings:
+    # FALLBACK_ORIGINS always win; ALLOWED_ORIGINS only adds more origins.
+    env_origins = _parse_origins(_env("ALLOWED_ORIGINS", ""))
+    allowed = tuple(dict.fromkeys(FALLBACK_ORIGINS + env_origins))
     return Settings(
         base_url=_env("ELEXON_BASE_URL", "https://data.elexon.co.uk/bmrs/api/v1"),
         period_start=date.fromisoformat(_env("PERIOD_START", "2026-01-01")),
@@ -117,12 +126,6 @@ def get_settings() -> Settings:
         cache_ttl_seconds=int(_env("CACHE_TTL_SECONDS", "3600")),
         http_timeout_seconds=float(_env("ELEXON_TIMEOUT_SECONDS", "60")),
         http_retries=int(_env("ELEXON_RETRIES", "3")),
-        allowed_origins=_parse_origins(
-            _env(
-                "ALLOWED_ORIGINS",
-                "http://localhost:5173,http://127.0.0.1:5173,"
-                "https://wind-forecast-intelligence-rho.vercel.app",
-            )
-        ),
+        allowed_origins=allowed,
         fuel_type=normalize_fuel_type(_env("FUEL_TYPE", "WIND")),
     )

@@ -372,8 +372,8 @@ export async function getJson<T>(path: string, signal?: AbortSignal): Promise<T>
 
 **Say:** one generic fetch wrapper → every call is typed, non-2xx becomes an `ApiError`
 carrying the backend's `detail` string, and network failure is a *different*, human message
-than a 5xx. `BASE = import.meta.env.VITE_API_BASE ?? ""` is the **one** place a deployment
-differs (same-origin proxy vs split-host CORS).
+than a 5xx. The `BASE` resolution at the top of `client.ts` is the **one** place a deployment
+differs (same-origin proxy vs split-host CORS vs the production fallback URL).
 
 **Show `App.tsx:59` — the data effect:**
 

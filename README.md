@@ -330,8 +330,8 @@ Copy `.env.example` → `.env` (never commit `.env`). **No API secrets exist** �
 | `FUEL_TYPE` | `WIND` | FUELHH fuel filter; overridable per request with `?fuel_type=` |
 | `CACHE_TTL_SECONDS` | `3600` | In-memory dataset TTL |
 | `ELEXON_TIMEOUT_SECONDS` / `ELEXON_RETRIES` | `60` / `3` | Upstream HTTP behaviour |
-| `ALLOWED_ORIGINS` | `http://localhost:5173,…` | Comma-separated CORS origins (add your Vercel URL) |
-| `VITE_API_BASE` | `""` | **Build-time** frontend API base; `""` = same-origin (Docker/dev proxy), set to the public backend URL for Vercel |
+| `ALLOWED_ORIGINS` | `localhost:5173` + deployed frontend | Comma-separated CORS origins; **extends** the built-in fallback list (never replaces it) |
+| `VITE_API_BASE` | unset | **Build-time** frontend API base; `same-origin` = Docker/nginx proxy, unset/empty in a production build = deployed backend fallback, or set an explicit backend URL |
 | `BACKEND_URL` | `http://backend:8000` | nginx proxy upstream inside the frontend container |
 
 ## 15. Backend API endpoints
@@ -398,11 +398,12 @@ Latest run: backend **88 passed**, frontend **40 passed + 1 gated**, live mode *
   ```bash
   npm install -g vercel
   cd frontend && vercel --prod
-  # set project env var at build time: VITE_API_BASE=https://<backend-public-url>
+  # no env vars needed: production builds fall back to the deployed backend URL
+  # (delete any stale/empty VITE_API_BASE from the project settings)
   ```
 - **Backend → Render** (free web tier, no credit card; Docker-native — [`render.yaml`](render.yaml)):
-  Dashboard → New → Blueprint → this repo. Then set
-  `ALLOWED_ORIGINS=https://<your-vercel-domain>.vercel.app`.
+  Dashboard → New → Blueprint → this repo. No env vars required: the deployed
+  Vercel frontend origin is built into the CORS allow-list (`ALLOWED_ORIGINS` only extends it).
 - **Why separate hosts:** the frontend is a static bundle (ideal for Vercel’s CDN) while the
   backend needs a long-running process to keep its in-memory dataset cache — serverless
   functions would re-fetch ~20k upstream rows on every cold start. Heroku was evaluated but has

@@ -205,9 +205,9 @@ Interactive docs (Swagger UI) are served by FastAPI at `http://localhost:8000/do
 
 | Symptom | Cause | Fix |
 |---|---|---|
-| "Backend unreachable — start the API server and retry." | API not running / wrong base URL | Start the backend; for the dev server check the proxy, for a deployed frontend set `VITE_API_BASE` at build time |
+| "Backend unreachable — start the API server and retry." | API not running / wrong base URL | Start the backend; for the dev server check the proxy, for a deployed frontend ensure no stale/empty `VITE_API_BASE` is set in the host's env (the production fallback points at the deployed backend) |
 | Slow first request (~4–6 s) | Cold dataset fetch from Elexon | Normal; cached for `CACHE_TTL_SECONDS` (3600) afterwards |
-| CORS error in the browser | Backend reached cross-origin without the origin allow-listed | Add your origin to `ALLOWED_ORIGINS` (comma-separated), or use the Docker/nginx same-origin path |
+| CORS error in the browser | Backend reached cross-origin without the origin allow-listed | The deployed frontend origin is built in; if you host elsewhere, add your origin to `ALLOWED_ORIGINS` (it extends, never replaces, the built-in list), or use the Docker/nginx same-origin path |
 | 400 `unknown fuel type …` | `?fuel_type=` value not in Elexon's fuel list | Use a value from the message (e.g. `WIND`, `NUCLEAR`, `CCGT`) |
 | 400 `range must be within the reporting period` | Start/end outside `PERIOD_START..PERIOD_END` | Keep the range inside the configured period |
 | 502 with an Elexon message | Upstream failure after 3 retries | Retry; check `http://localhost:8000/health` and network access to `data.elexon.co.uk` |

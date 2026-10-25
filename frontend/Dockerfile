@@ -8,10 +8,11 @@ RUN npm ci
 
 COPY . .
 
-# API base URL is injected at build time ("" = same-origin, proxied by nginx).
-# For Vercel deploys set this to the public backend URL, e.g.
+# API base URL is injected at build time. "same-origin" (default) = requests
+# stay on this origin and nginx proxies /api + /health to the backend.
+# For a static deploy set the public backend URL, e.g.
 #   --build-arg VITE_API_BASE=https://your-backend.onrender.com
-ARG VITE_API_BASE=""
+ARG VITE_API_BASE="same-origin"
 ENV VITE_API_BASE=${VITE_API_BASE}
 
 RUN npm run build
